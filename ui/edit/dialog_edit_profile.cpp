@@ -17,14 +17,17 @@
 #include "main/GuiUtils.hpp"
 
 #include <QInputDialog>
+#include <QDialogButtonBox>
 
-#define ADJUST_SIZE runOnUiThread([=] { adjustSize(); adjustPosition(mainwindow); }, this);
+#define ADJUST_SIZE runOnUiThread([=] { adjustSize(); }, this);
 #define LOAD_TYPE(a) ui->type->addItem(NekoGui::ProfileManager::NewProxyEntity(a)->bean->DisplayType(), a);
 
 DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId, QWidget *parent)
-    : QDialog(parent), ui(new Ui::DialogEditProfile) {
+    : QWidget(parent), ui(new Ui::DialogEditProfile) {
     // setup UI
     ui->setupUi(this);
+    connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &DialogEditProfile::apply);
+    connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &DialogEditProfile::onCancel);
     ui->dialog_layout->setAlignment(ui->left, Qt::AlignTop);
 
     // network changed
@@ -367,7 +370,11 @@ bool DialogEditProfile::onEnd() {
     return true;
 }
 
-void DialogEditProfile::accept() {
+void DialogEditProfile::onCancel() {
+    emit pageFinished(false);
+}
+
+void DialogEditProfile::apply() {
     // save to ent
     if (!onEnd()) {
         return;
@@ -387,7 +394,7 @@ void DialogEditProfile::accept() {
     }
 
     MW_dialog_message(Dialog_DialogEditProfile, msg.join(","));
-    QDialog::accept();
+    emit pageFinished(true);
 }
 
 // cached editor (dialog)

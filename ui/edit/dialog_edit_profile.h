@@ -1,7 +1,7 @@
 #ifndef DIALOG_EDIT_PROFILE_H
 #define DIALOG_EDIT_PROFILE_H
 
-#include <QDialog>
+#include <QWidget>
 #include "db/Database.hpp"
 #include "profile_editor.h"
 
@@ -11,7 +11,7 @@ namespace Ui {
     class DialogEditProfile;
 }
 
-class DialogEditProfile : public QDialog {
+class DialogEditProfile : public QWidget {
     Q_OBJECT
 
 public:
@@ -19,9 +19,15 @@ public:
 
     ~DialogEditProfile() override;
 
+signals:
+
+    void pageFinished(bool saved);
+
 public slots:
 
-    void accept() override;
+    void apply();
+
+    void onCancel();
 
 private slots:
 

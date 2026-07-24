@@ -1,7 +1,6 @@
-#ifndef NEKORAY_DIALOG_VPN_SETTINGS_H
-#define NEKORAY_DIALOG_VPN_SETTINGS_H
+#pragma once
 
-#include <QDialog>
+#include <QWidget>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -9,7 +8,7 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
-class DialogVPNSettings : public QDialog {
+class DialogVPNSettings : public QWidget {
     Q_OBJECT
 
 public:
@@ -17,14 +16,16 @@ public:
 
     ~DialogVPNSettings() override;
 
+public slots:
+
+    void apply();
+
+    void onCancel();
+
 private:
     Ui::DialogVPNSettings *ui;
 
-public slots:
-
-    void accept() override;
+private slots:
 
     void on_troubleshooting_clicked();
 };
-
-#endif // NEKORAY_DIALOG_VPN_SETTINGS_H

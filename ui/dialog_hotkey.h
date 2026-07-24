@@ -1,7 +1,6 @@
 #pragma once
 
-#include <QDialog>
-#include "main/NekoGui.hpp"
+#include <QWidget>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -9,13 +8,19 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
-class DialogHotkey : public QDialog {
+class DialogHotkey : public QWidget {
     Q_OBJECT
 
 public:
     explicit DialogHotkey(QWidget *parent = nullptr);
 
     ~DialogHotkey() override;
+
+public slots:
+
+    void apply();
+
+    void onCancel();
 
 private:
     Ui::DialogHotkey *ui;

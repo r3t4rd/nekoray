@@ -6,9 +6,12 @@
 #include "ui/mainwindow_interface.h"
 
 #include <QMessageBox>
+#include <QDialogButtonBox>
 
-DialogVPNSettings::DialogVPNSettings(QWidget *parent) : QDialog(parent), ui(new Ui::DialogVPNSettings) {
+DialogVPNSettings::DialogVPNSettings(QWidget *parent) : QWidget(parent), ui(new Ui::DialogVPNSettings) {
     ui->setupUi(this);
+    connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &DialogVPNSettings::apply);
+    connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &DialogVPNSettings::onCancel);
     ADD_ASTERISK(this);
 
     ui->fake_dns->setChecked(NekoGui::dataStore->fake_dns);
@@ -41,7 +44,10 @@ DialogVPNSettings::~DialogVPNSettings() {
     delete ui;
 }
 
-void DialogVPNSettings::accept() {
+void DialogVPNSettings::onCancel() {
+}
+
+void DialogVPNSettings::apply() {
     //
     auto mtu = ui->vpn_mtu->currentText().toInt();
     if (mtu > 10000 || mtu < 1000) mtu = 9000;
@@ -65,7 +71,6 @@ void DialogVPNSettings::accept() {
         msg << "VPNChanged";
     }
     MW_dialog_message("", msg.join(","));
-    QDialog::accept();
 }
 
 void DialogVPNSettings::on_troubleshooting_clicked() {

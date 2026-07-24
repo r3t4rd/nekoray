@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QDialog>
+#include <QWidget>
 #include <QMenu>
 
 #include "3rdparty/qv2ray/v2/ui/QvAutoCompleteTextEdit.hpp"
@@ -12,13 +12,17 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
-class DialogManageRoutes : public QDialog {
+class DialogManageRoutes : public QWidget {
     Q_OBJECT
 
 public:
     explicit DialogManageRoutes(QWidget *parent = nullptr);
 
     ~DialogManageRoutes() override;
+
+    void setSection(int tabIndex);
+
+    void openCustomRouteEditor(bool global = false);
 
 private:
     Ui::DialogManageRoutes *ui;
@@ -45,7 +49,9 @@ private:
 
 public slots:
 
-    void accept() override;
+    void apply();
+
+    void onCancel();
 
     QList<QAction *> getBuiltInSchemes();
 

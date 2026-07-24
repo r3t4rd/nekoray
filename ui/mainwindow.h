@@ -4,6 +4,12 @@
 
 #include "main/NekoGui.hpp"
 
+#include <memory>
+
+namespace NekoGui {
+    class Group;
+}
+
 #ifndef MW_INTERFACE
 
 #include <QTime>
@@ -19,7 +25,14 @@
 #include "GroupSort.hpp"
 
 #include "db/ProxyEntity.hpp"
+#include "db/Group.hpp"
 #include "main/GuiUtils.hpp"
+
+class DialogBasicSettings;
+class DialogManageGroups;
+class DialogManageRoutes;
+class DialogVPNSettings;
+class DialogHotkey;
 
 #endif
 
@@ -66,6 +79,12 @@ public:
     void RegisterHotkey(bool unregister);
 
     bool StopVPNProcess(bool unconditional = false);
+
+    void navigateTo(const QString &pageId, int section = -1);
+
+    void openEditProfile(const QString &type, int id);
+
+    void openEditGroup(const std::shared_ptr<NekoGui::Group> &ent);
 
 signals:
 
@@ -174,6 +193,20 @@ private:
     void keyPressEvent(QKeyEvent *event) override;
 
     void closeEvent(QCloseEvent *event) override;
+
+    void setupNavigation();
+
+    class QTreeWidget *navTree = nullptr;
+    class QStackedWidget *pageStack = nullptr;
+    QWidget *pageProxies = nullptr;
+    DialogBasicSettings *pageBasic = nullptr;
+    DialogManageGroups *pageGroups = nullptr;
+    DialogManageRoutes *pageRoutes = nullptr;
+    DialogVPNSettings *pageVpn = nullptr;
+    DialogHotkey *pageHotkey = nullptr;
+    QWidget *pageEditProfileHost = nullptr;
+    QWidget *pageEditGroupHost = nullptr;
+    QString navReturnPage = "proxies";
 
     //
 

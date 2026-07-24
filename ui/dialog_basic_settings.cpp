@@ -13,6 +13,7 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QTimer>
+#include <QDialogButtonBox>
 
 class ExtraCoreWidget : public QWidget {
 public:
@@ -53,8 +54,10 @@ public:
 };
 
 DialogBasicSettings::DialogBasicSettings(QWidget *parent)
-    : QDialog(parent), ui(new Ui::DialogBasicSettings) {
+    : QWidget(parent), ui(new Ui::DialogBasicSettings) {
     ui->setupUi(this);
+    connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &DialogBasicSettings::apply);
+    connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &DialogBasicSettings::onCancel);
     ADD_ASTERISK(this);
 
     // Common
@@ -212,7 +215,17 @@ DialogBasicSettings::~DialogBasicSettings() {
     delete ui;
 }
 
-void DialogBasicSettings::accept() {
+void DialogBasicSettings::setSection(int tabIndex) {
+    if (tabIndex >= 0 && tabIndex < ui->tabWidget->count()) {
+        ui->tabWidget->setCurrentIndex(tabIndex);
+    }
+}
+
+void DialogBasicSettings::onCancel() {
+    // stay on page; user can re-open via nav
+}
+
+void DialogBasicSettings::apply() {
     // Common
 
     D_SAVE_STRING(inbound_address)
@@ -288,7 +301,6 @@ void DialogBasicSettings::accept() {
     QStringList str{"UpdateDataStore"};
     if (CACHE.needRestart) str << "NeedRestart";
     MW_dialog_message(Dialog_DialogBasicSettings, str.join(","));
-    QDialog::accept();
 }
 
 // slots

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QWidget>
-#include <QDialog>
 #include <QMenu>
 #include <QTableWidgetItem>
 
@@ -13,13 +12,21 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
-class DialogManageGroups : public QDialog {
+class DialogManageGroups : public QWidget {
     Q_OBJECT
 
 public:
     explicit DialogManageGroups(QWidget *parent = nullptr);
 
     ~DialogManageGroups() override;
+
+    void refreshData();
+
+signals:
+
+    void requestEditGroup(int groupId);
+
+    void requestAddGroup();
 
 private:
     Ui::DialogManageGroups *ui;

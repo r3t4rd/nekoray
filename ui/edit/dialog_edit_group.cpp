@@ -5,11 +5,14 @@
 #include "ui/mainwindow_interface.h"
 
 #include <QClipboard>
+#include <QDialogButtonBox>
 
-#define ADJUST_SIZE runOnUiThread([=] { adjustSize(); adjustPosition(mainwindow); }, this);
+#define ADJUST_SIZE runOnUiThread([=] { adjustSize(); }, this);
 
-DialogEditGroup::DialogEditGroup(const std::shared_ptr<NekoGui::Group> &ent, QWidget *parent) : QDialog(parent), ui(new Ui::DialogEditGroup) {
+DialogEditGroup::DialogEditGroup(const std::shared_ptr<NekoGui::Group> &ent, QWidget *parent) : QWidget(parent), ui(new Ui::DialogEditGroup) {
     ui->setupUi(this);
+    connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &DialogEditGroup::apply);
+    connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &DialogEditGroup::onCancel);
     this->ent = ent;
 
     connect(ui->type, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, [=](int index) {
@@ -70,7 +73,11 @@ DialogEditGroup::~DialogEditGroup() {
     delete ui;
 }
 
-void DialogEditGroup::accept() {
+void DialogEditGroup::onCancel() {
+    emit pageFinished(false);
+}
+
+void DialogEditGroup::apply() {
     if (ent->id >= 0) { // already a group
         if (!ent->url.isEmpty() && ui->url->text().isEmpty()) {
             MessageBoxWarning(tr("Warning"), tr("Please input URL"));
@@ -83,7 +90,7 @@ void DialogEditGroup::accept() {
     ent->skip_auto_update = ui->skip_auto_update->isChecked();
     ent->manually_column_width = ui->manually_column_width->isChecked();
     ent->front_proxy_id = CACHE.front_proxy;
-    QDialog::accept();
+    emit pageFinished(true);
 }
 
 void DialogEditGroup::refresh_front_proxy() {
@@ -92,13 +99,10 @@ void DialogEditGroup::refresh_front_proxy() {
 }
 
 void DialogEditGroup::on_front_proxy_clicked() {
-    auto parent = dynamic_cast<QWidget *>(this->parent());
-    parent->hide();
-    this->hide();
+    GetMainWindow()->navigateTo("proxies");
     GetMainWindow()->start_select_mode(this, [=](int id) {
         CACHE.front_proxy = id;
         refresh_front_proxy();
-        parent->show();
-        show();
+        GetMainWindow()->navigateTo("edit_group");
     });
 }

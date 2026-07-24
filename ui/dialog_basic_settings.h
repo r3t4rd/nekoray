@@ -1,14 +1,14 @@
 #ifndef DIALOG_BASIC_SETTINGS_H
 #define DIALOG_BASIC_SETTINGS_H
 
-#include <QDialog>
+#include <QWidget>
 #include <QJsonObject>
 
 namespace Ui {
     class DialogBasicSettings;
 }
 
-class DialogBasicSettings : public QDialog {
+class DialogBasicSettings : public QWidget {
     Q_OBJECT
 
 public:
@@ -16,9 +16,13 @@ public:
 
     ~DialogBasicSettings();
 
+    void setSection(int tabIndex);
+
 public slots:
 
-    void accept();
+    void apply();
+
+    void onCancel();
 
 private:
     Ui::DialogBasicSettings *ui;

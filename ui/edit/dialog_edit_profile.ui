@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>DialogEditProfile</class>
- <widget class="QDialog" name="DialogEditProfile">
+ <widget class="QWidget" name="DialogEditProfile">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -668,38 +668,4 @@ security (QUIC)</string>
   <tabstop>reality_sid</tabstop>
  </tabstops>
  <resources/>
- <connections>
-  <connection>
-   <sender>buttonBox</sender>
-   <signal>accepted()</signal>
-   <receiver>DialogEditProfile</receiver>
-   <slot>accept()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>151</x>
-     <y>500</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>299</x>
-     <y>299</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>buttonBox</sender>
-   <signal>rejected()</signal>
-   <receiver>DialogEditProfile</receiver>
-   <slot>reject()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>151</x>
-     <y>500</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>299</x>
-     <y>299</y>
-    </hint>
-   </hints>
-  </connection>
- </connections>
 </ui>

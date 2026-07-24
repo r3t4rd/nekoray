@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QDialog>
+#include <QWidget>
 #include "db/Group.hpp"
 
 QT_BEGIN_NAMESPACE
@@ -9,13 +9,17 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
-class DialogEditGroup : public QDialog {
+class DialogEditGroup : public QWidget {
     Q_OBJECT
 
 public:
     explicit DialogEditGroup(const std::shared_ptr<NekoGui::Group> &ent, QWidget *parent = nullptr);
 
     ~DialogEditGroup() override;
+
+signals:
+
+    void pageFinished(bool saved);
 
 private:
     Ui::DialogEditGroup *ui;
@@ -30,7 +34,9 @@ private:
 
 private slots:
 
-    void accept() override;
+    void apply();
+
+    void onCancel();
 
     void on_front_proxy_clicked();
 };

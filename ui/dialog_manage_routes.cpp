@@ -10,14 +10,17 @@
 #include <QMessageBox>
 #include <QListWidget>
 #include <QLineEdit>
+#include <QDialogButtonBox>
 
 #define REFRESH_ACTIVE_ROUTING(name, obj)           \
     this->active_routing = name;                    \
     setWindowTitle(title_base + " [" + name + "]"); \
     UpdateDisplayRouting(obj, false);
 
-DialogManageRoutes::DialogManageRoutes(QWidget *parent) : QDialog(parent), ui(new Ui::DialogManageRoutes) {
+DialogManageRoutes::DialogManageRoutes(QWidget *parent) : QWidget(parent), ui(new Ui::DialogManageRoutes) {
     ui->setupUi(this);
+    connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &DialogManageRoutes::apply);
+    connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &DialogManageRoutes::onCancel);
     title_base = windowTitle();
 
     QStringList qsValue = {""};
@@ -93,7 +96,25 @@ DialogManageRoutes::~DialogManageRoutes() {
     delete ui;
 }
 
-void DialogManageRoutes::accept() {
+void DialogManageRoutes::setSection(int tabIndex) {
+    if (tabIndex >= 0 && tabIndex < ui->tabWidget->count()) {
+        ui->tabWidget->setCurrentIndex(tabIndex);
+    }
+}
+
+void DialogManageRoutes::openCustomRouteEditor(bool global) {
+    setSection(2);
+    if (global) {
+        ui->custom_route_global_edit->click();
+    } else {
+        ui->custom_route_edit->click();
+    }
+}
+
+void DialogManageRoutes::onCancel() {
+}
+
+void DialogManageRoutes::apply() {
     D_C_SAVE_STRING(custom_route_global)
     bool routeChanged = false;
     if (NekoGui::dataStore->active_routing != active_routing) routeChanged = true;
@@ -105,7 +126,6 @@ void DialogManageRoutes::accept() {
     QString info = "UpdateDataStore";
     if (routeChanged) info += "RouteChanged";
     MW_dialog_message(Dialog_DialogManageRoutes, info);
-    QDialog::accept();
 }
 
 // built in settings

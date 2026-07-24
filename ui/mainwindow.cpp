@@ -11,6 +11,7 @@
 #include "ui/ThemeManager.hpp"
 #include "ui/Icon.hpp"
 #include "ui/edit/dialog_edit_profile.h"
+#include "ui/edit/dialog_edit_group.h"
 #include "ui/dialog_basic_settings.h"
 #include "ui/dialog_manage_groups.h"
 #include "ui/dialog_manage_routes.h"
@@ -47,6 +48,13 @@
 #include <QMessageBox>
 #include <QDir>
 #include <QFileInfo>
+#include <QTreeWidget>
+#include <QStackedWidget>
+#include <QSplitter>
+#include <QTabBar>
+#include <QDialogButtonBox>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
 
 void UI_InitMainWindow() {
     mainwindow = new MainWindow;
@@ -97,11 +105,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // top bar
     ui->toolButton_program->setMenu(ui->menu_program);
-    ui->toolButton_preferences->setMenu(ui->menu_preferences);
+    ui->toolButton_preferences->setVisible(false);
     ui->toolButton_server->setMenu(ui->menu_server);
     ui->menubar->setVisible(false);
     connect(ui->toolButton_update, &QToolButton::clicked, this, [=] { runOnNewThread([=] { CheckUpdate(); }); });
     connect(ui->toolButton_url_test, &QToolButton::clicked, this, [=] { speedtest_current_group(1, true); });
+
+    setupNavigation();
 
     // Setup log UI
     ui->splitter->restoreState(DecodeB64IfValid(NekoGui::dataStore->splitter_state));
@@ -592,34 +602,274 @@ void MainWindow::dialog_message_impl(const QString &sender, const QString &info)
 
 inline bool dialog_is_using = false;
 
-#define USE_DIALOG(a)                               \
-    if (dialog_is_using) return;                    \
-    dialog_is_using = true;                         \
-    auto dialog = new a(this);                      \
-    connect(dialog, &QDialog::finished, this, [=] { \
-        dialog->deleteLater();                      \
-        dialog_is_using = false;                    \
-    });                                             \
-    dialog->show();
+void MainWindow::setupNavigation() {
+    auto *oldLayout = ui->centralwidget->layout();
+    pageProxies = new QWidget(ui->centralwidget);
+    auto *proxiesLayout = new QVBoxLayout(pageProxies);
+    proxiesLayout->setContentsMargins(0, 0, 0, 0);
+    proxiesLayout->setSpacing(6);
+
+    // Move existing central layout children into proxies page
+    while (oldLayout->count() > 0) {
+        auto *item = oldLayout->takeAt(0);
+        if (item->widget()) {
+            proxiesLayout->addWidget(item->widget());
+        } else if (item->layout()) {
+            proxiesLayout->addLayout(item->layout());
+        } else {
+            delete item;
+        }
+    }
+    delete oldLayout;
+
+    navTree = new QTreeWidget(ui->centralwidget);
+    navTree->setHeaderHidden(true);
+    navTree->setMinimumWidth(200);
+    navTree->setMaximumWidth(280);
+    navTree->setIndentation(14);
+    navTree->setAnimated(true);
+    navTree->setObjectName("navTree");
+    navTree->setStyleSheet(
+        "QTreeWidget#navTree {"
+        "  background: #1e1f24;"
+        "  color: #e8e8ea;"
+        "  border: none;"
+        "  outline: none;"
+        "  padding: 8px 4px;"
+        "  font-size: 13px;"
+        "}"
+        "QTreeWidget#navTree::item {"
+        "  padding: 6px 8px;"
+        "  margin: 1px 4px;"
+        "  border-radius: 6px;"
+        "}"
+        "QTreeWidget#navTree::item:hover {"
+        "  background: #2a2c34;"
+        "}"
+        "QTreeWidget#navTree::item:selected {"
+        "  background: #3a5fcd;"
+        "  color: white;"
+        "}");
+
+    pageStack = new QStackedWidget(ui->centralwidget);
+    pageStack->addWidget(pageProxies); // index 0
+
+    pageBasic = new DialogBasicSettings(pageStack);
+    if (auto *tabs = pageBasic->findChild<QTabWidget *>("tabWidget")) {
+        tabs->tabBar()->hide();
+    }
+    if (auto *box = pageBasic->findChild<QDialogButtonBox *>("buttonBox")) {
+        if (auto *ok = box->button(QDialogButtonBox::Ok)) ok->setText(tr("Apply"));
+        if (auto *cancel = box->button(QDialogButtonBox::Cancel)) cancel->setText(tr("Reset"));
+    }
+    pageStack->addWidget(pageBasic);
+
+    pageGroups = new DialogManageGroups(pageStack);
+    pageStack->addWidget(pageGroups);
+
+    pageRoutes = new DialogManageRoutes(pageStack);
+    if (auto *tabs = pageRoutes->findChild<QTabWidget *>("tabWidget")) {
+        tabs->tabBar()->hide();
+    }
+    if (auto *box = pageRoutes->findChild<QDialogButtonBox *>("buttonBox")) {
+        if (auto *ok = box->button(QDialogButtonBox::Ok)) ok->setText(tr("Apply"));
+        if (auto *cancel = box->button(QDialogButtonBox::Cancel)) cancel->setText(tr("Reset"));
+    }
+    pageStack->addWidget(pageRoutes);
+
+    pageVpn = new DialogVPNSettings(pageStack);
+    if (auto *box = pageVpn->findChild<QDialogButtonBox *>("buttonBox")) {
+        if (auto *ok = box->button(QDialogButtonBox::Ok)) ok->setText(tr("Apply"));
+        if (auto *cancel = box->button(QDialogButtonBox::Cancel)) cancel->setText(tr("Reset"));
+    }
+    pageStack->addWidget(pageVpn);
+
+    pageHotkey = new DialogHotkey(pageStack);
+    if (auto *box = pageHotkey->findChild<QDialogButtonBox *>("buttonBox")) {
+        if (auto *ok = box->button(QDialogButtonBox::Ok)) ok->setText(tr("Apply"));
+        if (auto *cancel = box->button(QDialogButtonBox::Cancel)) cancel->setText(tr("Reset"));
+    }
+    pageStack->addWidget(pageHotkey);
+
+    pageEditProfileHost = new QWidget(pageStack);
+    pageEditProfileHost->setLayout(new QVBoxLayout);
+    pageEditProfileHost->layout()->setContentsMargins(0, 0, 0, 0);
+    pageStack->addWidget(pageEditProfileHost);
+
+    pageEditGroupHost = new QWidget(pageStack);
+    pageEditGroupHost->setLayout(new QVBoxLayout);
+    pageEditGroupHost->layout()->setContentsMargins(0, 0, 0, 0);
+    pageStack->addWidget(pageEditGroupHost);
+
+    auto addNav = [&](QTreeWidgetItem *parent, const QString &text, const QString &id, int section = -1) {
+        auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(navTree);
+        item->setText(0, text);
+        item->setData(0, Qt::UserRole, id);
+        item->setData(0, Qt::UserRole + 1, section);
+        return item;
+    };
+
+    addNav(nullptr, tr("Proxies"), "proxies");
+
+    auto *pref = addNav(nullptr, tr("Preferences"), "preferences");
+    pref->setExpanded(true);
+
+    auto *basic = addNav(pref, tr("Basic Settings"), "basic", 0);
+    basic->setExpanded(true);
+    addNav(basic, tr("Common"), "basic", 0);
+    addNav(basic, tr("Style"), "basic", 1);
+    addNav(basic, tr("Subscription"), "basic", 2);
+    addNav(basic, tr("Core"), "basic", 3);
+    addNav(basic, tr("Extra Core"), "basic", 4);
+    addNav(basic, tr("Security"), "basic", 5);
+
+    addNav(pref, tr("Groups"), "groups");
+
+    auto *routes = addNav(pref, tr("Routes"), "routes", 0);
+    routes->setExpanded(true);
+    addNav(routes, tr("Common"), "routes", 0);
+    addNav(routes, tr("DNS"), "routes", 1);
+    addNav(routes, tr("Simple Route"), "routes", 2);
+    addNav(routes, tr("Custom Route"), "routes_custom", 0);
+
+    addNav(pref, tr("Tun Settings"), "tun");
+    addNav(pref, tr("Hotkeys"), "hotkey");
+
+    connect(navTree, &QTreeWidget::itemClicked, this, [=](QTreeWidgetItem *item, int) {
+        if (!item) return;
+        navigateTo(item->data(0, Qt::UserRole).toString(), item->data(0, Qt::UserRole + 1).toInt());
+    });
+
+    connect(pageGroups, &DialogManageGroups::requestEditGroup, this, [=](int groupId) {
+        openEditGroup(NekoGui::profileManager->GetGroup(groupId));
+    });
+    connect(pageGroups, &DialogManageGroups::requestAddGroup, this, [=] {
+        openEditGroup(NekoGui::ProfileManager::NewGroup());
+    });
+
+    auto *shell = new QHBoxLayout(ui->centralwidget);
+    shell->setContentsMargins(0, 0, 0, 0);
+    shell->setSpacing(0);
+    shell->addWidget(navTree);
+    shell->addWidget(pageStack, 1);
+
+    navigateTo("proxies");
+}
+
+void MainWindow::navigateTo(const QString &pageId, int section) {
+    if (pageId == "preferences") {
+        navigateTo("basic", 0);
+        return;
+    }
+
+    QWidget *target = pageProxies;
+    if (pageId == "proxies") {
+        target = pageProxies;
+    } else if (pageId == "basic") {
+        target = pageBasic;
+        pageBasic->setSection(section < 0 ? 0 : section);
+    } else if (pageId == "groups") {
+        target = pageGroups;
+        pageGroups->refreshData();
+    } else if (pageId == "routes") {
+        target = pageRoutes;
+        pageRoutes->setSection(section < 0 ? 0 : section);
+    } else if (pageId == "routes_custom") {
+        target = pageRoutes;
+        pageRoutes->openCustomRouteEditor(false);
+    } else if (pageId == "tun") {
+        target = pageVpn;
+    } else if (pageId == "hotkey") {
+        target = pageHotkey;
+    } else if (pageId == "edit_profile") {
+        target = pageEditProfileHost;
+    } else if (pageId == "edit_group") {
+        target = pageEditGroupHost;
+    }
+
+    if (pageId != "edit_profile" && pageId != "edit_group") {
+        navReturnPage = pageId;
+    }
+
+    pageStack->setCurrentWidget(target);
+
+    // Sync tree selection
+    if (navTree) {
+        QTreeWidgetItemIterator it(navTree);
+        while (*it) {
+            if ((*it)->data(0, Qt::UserRole).toString() == pageId &&
+                (section < 0 || (*it)->data(0, Qt::UserRole + 1).toInt() == section)) {
+                navTree->setCurrentItem(*it);
+                break;
+            }
+            ++it;
+        }
+    }
+}
+
+void MainWindow::openEditProfile(const QString &type, int id) {
+    // clear previous editor
+    while (auto *w = pageEditProfileHost->findChild<DialogEditProfile *>()) {
+        delete w;
+    }
+    auto *editor = new DialogEditProfile(type, id, pageEditProfileHost);
+    pageEditProfileHost->layout()->addWidget(editor);
+    connect(editor, &DialogEditProfile::pageFinished, this, [=](bool) {
+        navigateTo(navReturnPage.isEmpty() ? "proxies" : navReturnPage);
+        while (auto *w = pageEditProfileHost->findChild<DialogEditProfile *>()) {
+            delete w;
+        }
+    });
+    pageStack->setCurrentWidget(pageEditProfileHost);
+}
+
+void MainWindow::openEditGroup(const std::shared_ptr<NekoGui::Group> &ent) {
+    if (ent == nullptr) return;
+    while (auto *w = pageEditGroupHost->findChild<DialogEditGroup *>()) {
+        delete w;
+    }
+    auto *editor = new DialogEditGroup(ent, pageEditGroupHost);
+    pageEditGroupHost->layout()->addWidget(editor);
+    connect(editor, &DialogEditGroup::pageFinished, this, [=](bool saved) {
+        if (saved) {
+            if (ent->id < 0) {
+                // new group was edited into fields; AddGroup assigns id
+                // DialogEditGroup only writes to ent fields; add if new
+            }
+            if (NekoGui::profileManager->groups.find(ent->id) == NekoGui::profileManager->groups.end()) {
+                NekoGui::profileManager->AddGroup(ent);
+            } else {
+                ent->Save();
+            }
+            pageGroups->refreshData();
+            MW_dialog_message(Dialog_DialogManageGroups, "refresh" + Int2String(ent->id));
+        }
+        navigateTo("groups");
+        while (auto *w = pageEditGroupHost->findChild<DialogEditGroup *>()) {
+            delete w;
+        }
+    });
+    pageStack->setCurrentWidget(pageEditGroupHost);
+}
 
 void MainWindow::on_menu_basic_settings_triggered() {
-    USE_DIALOG(DialogBasicSettings)
+    navigateTo("basic", 0);
 }
 
 void MainWindow::on_menu_manage_groups_triggered() {
-    USE_DIALOG(DialogManageGroups)
+    navigateTo("groups");
 }
 
 void MainWindow::on_menu_routing_settings_triggered() {
-    USE_DIALOG(DialogManageRoutes)
+    navigateTo("routes", 0);
 }
 
 void MainWindow::on_menu_vpn_settings_triggered() {
-    USE_DIALOG(DialogVPNSettings)
+    navigateTo("tun");
 }
 
 void MainWindow::on_menu_hotkey_settings_triggered() {
-    USE_DIALOG(DialogHotkey)
+    navigateTo("hotkey");
 }
 
 void MainWindow::on_commitDataRequest() {
@@ -1085,13 +1335,11 @@ void MainWindow::on_proxyListTable_itemDoubleClicked(QTableWidgetItem *item) {
         refresh_status();
         return;
     }
-    auto dialog = new DialogEditProfile("", id, this);
-    connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
+    openEditProfile("", id);
 }
 
 void MainWindow::on_menu_add_from_input_triggered() {
-    auto dialog = new DialogEditProfile("socks", NekoGui::dataStore->current_group, this);
-    connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
+    openEditProfile("socks", NekoGui::dataStore->current_group);
 }
 
 void MainWindow::on_menu_add_from_clipboard_triggered() {

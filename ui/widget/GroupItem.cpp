@@ -1,9 +1,9 @@
 #include "GroupItem.h"
 #include "ui_GroupItem.h"
 
-#include "ui/edit/dialog_edit_group.h"
 #include "main/GuiUtils.hpp"
 #include "sub/GroupUpdater.hpp"
+#include "ui/mainwindow_interface.h"
 
 #include <QMessageBox>
 
@@ -103,16 +103,7 @@ void GroupItem::on_update_sub_clicked() {
 }
 
 void GroupItem::on_edit_clicked() {
-    auto dialog = new DialogEditGroup(ent, parentWindow);
-    connect(dialog, &QDialog::finished, this, [=] {
-        if (dialog->result() == QDialog::Accepted) {
-            ent->Save();
-            refresh_data();
-            MW_dialog_message(Dialog_DialogManageGroups, "refresh" + Int2String(ent->id));
-        }
-        dialog->deleteLater();
-    });
-    dialog->show();
+    GetMainWindow()->openEditGroup(ent);
 }
 
 void GroupItem::on_remove_clicked() {
