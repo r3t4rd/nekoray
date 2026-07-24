@@ -422,12 +422,13 @@ namespace NekoGui {
             inboundObj["type"] = "tun";
             inboundObj["interface_name"] = genTunName();
             inboundObj["auto_route"] = true;
-            inboundObj["endpoint_independent_nat"] = true;
             inboundObj["mtu"] = dataStore->vpn_mtu;
             inboundObj["stack"] = Preset::SingBox::VpnImplementation.value(dataStore->vpn_implementation);
             inboundObj["strict_route"] = dataStore->vpn_strict_route;
-            inboundObj["inet4_address"] = "172.19.0.1/28";
-            if (dataStore->vpn_ipv6) inboundObj["inet6_address"] = "fdfe:dcba:9876::1/126";
+            QJsonArray tunAddress;
+            tunAddress += "172.19.0.1/28";
+            if (dataStore->vpn_ipv6) tunAddress += "fdfe:dcba:9876::1/126";
+            inboundObj["address"] = tunAddress;
             if (dataStore->routing->sniffing_mode != SniffingMode::DISABLE) {
                 inboundObj["sniff"] = true;
                 inboundObj["sniff_override_destination"] = dataStore->routing->sniffing_mode == SniffingMode::FOR_DESTINATION;
@@ -782,7 +783,7 @@ namespace NekoGui {
         auto configFn = ":/neko/vpn/sing-box-vpn.json";
         if (QFile::exists("vpn/sing-box-vpn.json")) configFn = "vpn/sing-box-vpn.json";
         auto config = ReadFileText(configFn)
-                          .replace("//%IPV6_ADDRESS%", dataStore->vpn_ipv6 ? R"("inet6_address": "fdfe:dcba:9876::1/126",)" : "")
+                          .replace("//%IPV6_ADDRESS%", dataStore->vpn_ipv6 ? R"(,"fdfe:dcba:9876::1/126")" : "")
                           .replace("//%SOCKS_USER_PASS%", socks_user_pass)
                           .replace("//%PROCESS_NAME_RULE%", process_name_rule)
                           .replace("//%CIDR_RULE%", cidr_rule)

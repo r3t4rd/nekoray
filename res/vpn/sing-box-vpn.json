@@ -62,13 +62,14 @@
             "type": "tun",
             "tag": "tun-in",
             "interface_name": "%TUN_NAME%",
-            "inet4_address": "172.19.0.1/28",
-            //%IPV6_ADDRESS%
+            "address": [
+                "172.19.0.1/28"
+                //%IPV6_ADDRESS%
+            ],
             "mtu": %MTU%,
             "auto_route": true,
             "strict_route": %STRICT_ROUTE%,
             "stack": "%STACK%",
-            "endpoint_independent_nat": true,
             "sniff": false
         }
     ],
