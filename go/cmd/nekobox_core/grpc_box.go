@@ -32,6 +32,7 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		if err != nil {
 			out.Error = err.Error()
 			instance = nil
+			instance_stats = nil
 		}
 	}()
 
@@ -49,12 +50,12 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 	if instance != nil {
 		// Logger
 		instance.SetLogWritter(neko_log.LogWriter)
-		// V2ray Service
 		if in.StatsOutbounds != nil {
-			instance.Router().SetV2RayServer(boxapi.NewSbV2rayServer(option.V2RayStatsServiceOptions{
+			instance_stats = boxapi.NewSbV2rayServer(option.V2RayStatsServiceOptions{
 				Enabled:   true,
 				Outbounds: in.StatsOutbounds,
-			}))
+			})
+			instance.Router().AppendTracker(instance_stats.StatsService())
 		}
 	}
 
@@ -79,6 +80,7 @@ func (s *server) Stop(ctx context.Context, in *gen.EmptyReq) (out *gen.ErrorResp
 	instance.Close()
 
 	instance = nil
+	instance_stats = nil
 
 	return
 }
@@ -114,7 +116,7 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (out *gen.TestResp, 
 			}
 		}
 		// Latency
-		out.Ms, err = speedtest.UrlTest(boxapi.CreateProxyHttpClient(i), in.Url, in.Timeout, speedtest.UrlTestStandard_RTT)
+		out.Ms, err = speedtest.UrlTest(boxapi.CreateProxyHttpClient(i, currentTracker()), in.Url, in.Timeout, speedtest.UrlTestStandard_RTT)
 	} else if in.Mode == gen.TestMode_TcpPing {
 		out.Ms, err = speedtest.TcpPing(in.Address, in.Timeout)
 	} else if in.Mode == gen.TestMode_FullTest {
@@ -135,10 +137,8 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (out *gen.TestResp, 
 func (s *server) QueryStats(ctx context.Context, in *gen.QueryStatsReq) (out *gen.QueryStatsResp, _ error) {
 	out = &gen.QueryStatsResp{}
 
-	if instance != nil {
-		if ss, ok := instance.Router().V2RayServer().(*boxapi.SbV2rayServer); ok {
-			out.Traffic = ss.QueryStats(fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", in.Tag, in.Direct))
-		}
+	if instance_stats != nil {
+		out.Traffic = instance_stats.QueryStats(fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", in.Tag, in.Direct))
 	}
 
 	return
