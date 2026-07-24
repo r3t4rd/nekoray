@@ -226,6 +226,7 @@ private:
 
     void setupNavigation();
 
+    class QWidget *navColumn = nullptr;
     class QTreeWidget *navTree = nullptr;
     class QStackedWidget *pageStack = nullptr;
     QWidget *pageProxies = nullptr;

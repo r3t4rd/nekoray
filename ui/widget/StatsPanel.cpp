@@ -4,7 +4,6 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QGridLayout>
 #include <QPainter>
 #include <QPainterPath>
 #include <QFrame>
@@ -15,25 +14,49 @@ TrafficSparkline::TrafficSparkline(QWidget *parent) : QWidget(parent) {
 }
 
 void TrafficSparkline::setSeries(const QVector<double> &up, const QVector<double> &down) {
-    upSeries = up;
-    downSeries = down;
+    seriesList = {up, down};
+    colorList = {upColor, downColor};
     update();
 }
 
 void TrafficSparkline::setColors(const QColor &up, const QColor &down) {
     upColor = up;
     downColor = down;
+    if (seriesList.size() == 2) {
+        colorList = {upColor, downColor};
+    }
+}
+
+void TrafficSparkline::setMultiSeries(const QVector<QVector<double>> &series, const QVector<QColor> &colors) {
+    seriesList = series;
+    colorList = colors;
+    update();
+}
+
+void TrafficSparkline::setTransparentBackground(bool on) {
+    transparentBg = on;
+    setAttribute(Qt::WA_TranslucentBackground, on);
+    setAutoFillBackground(!on);
+}
+
+void TrafficSparkline::setShowWindowLabel(bool on) {
+    showLabel = on;
 }
 
 void TrafficSparkline::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.fillRect(rect(), QColor(30, 32, 38));
+    if (!transparentBg) {
+        p.fillRect(rect(), QColor(30, 32, 38));
+    }
+
+    double maxV = 1.0;
+    for (const auto &series: seriesList) {
+        for (double v: series) maxV = qMax(maxV, v);
+    }
 
     auto drawSeries = [&](const QVector<double> &series, const QColor &color) {
         if (series.size() < 2) return;
-        double maxV = 1.0;
-        for (double v: series) maxV = qMax(maxV, v);
         QPainterPath path;
         const int n = series.size();
         for (int i = 0; i < n; ++i) {
@@ -47,18 +70,22 @@ void TrafficSparkline::paintEvent(QPaintEvent *) {
         fill.lineTo(1, height() - 1);
         fill.closeSubpath();
         QColor fillC = color;
-        fillC.setAlpha(60);
+        fillC.setAlpha(transparentBg ? 45 : 55);
         p.fillPath(fill, fillC);
-        QPen pen(color, 1.8);
+        QPen pen(color, transparentBg ? 2.0 : 1.8);
         p.setPen(pen);
         p.drawPath(path);
     };
 
-    drawSeries(downSeries, downColor);
-    drawSeries(upSeries, upColor);
+    const int n = qMin(seriesList.size(), colorList.size());
+    for (int i = 0; i < n; ++i) {
+        drawSeries(seriesList[i], colorList[i]);
+    }
 
-    p.setPen(QColor(180, 180, 180));
-    p.drawText(8, 16, QStringLiteral("1 min"));
+    if (showLabel) {
+        p.setPen(QColor(180, 180, 180));
+        p.drawText(8, 16, QStringLiteral("1 min"));
+    }
 }
 
 class ShareBarWidget : public QWidget {
@@ -75,10 +102,10 @@ protected:
         p.setRenderHint(QPainter::Antialiasing, true);
         QRectF r = rect().adjusted(1, 3, -1, -3);
         p.setPen(Qt::NoPen);
-        p.setBrush(QColor(56, 132, 255));
+        p.setBrush(TrafficSparkline::colorProxyDown());
         double w = r.width() * qBound(0.0, proxyRatio, 1.0);
         p.drawRoundedRect(QRectF(r.left(), r.top(), w, r.height()), 4, 4);
-        p.setBrush(QColor(46, 160, 67));
+        p.setBrush(TrafficSparkline::colorDirectDown());
         p.drawRoundedRect(QRectF(r.left() + w, r.top(), r.width() - w, r.height()), 4, 4);
     }
 };
@@ -89,7 +116,8 @@ StatsPanel::StatsPanel(QWidget *parent) : QWidget(parent) {
     layout->setSpacing(8);
 
     auto *speedRow = new QHBoxLayout;
-    auto makeCard = [&](const QString &title, QLabel **speedOut, QLabel **totalOut, TrafficSparkline **chartOut, const QColor &up, const QColor &down) {
+    auto makeCard = [&](const QString &title, QLabel **speedOut, QLabel **totalOut, TrafficSparkline **chartOut,
+                        const QColor &up, const QColor &down, const QString &upName, const QString &dnName) {
         auto *box = new QFrame(this);
         box->setFrameShape(QFrame::NoFrame);
         box->setStyleSheet("QFrame { background: #1e1f24; border-radius: 8px; }");
@@ -100,17 +128,28 @@ StatsPanel::StatsPanel(QWidget *parent) : QWidget(parent) {
         (*speedOut)->setStyleSheet("color:#eee; font-size:16px; font-weight:600;");
         *totalOut = new QLabel(QStringLiteral("0 B↑  0 B↓"), box);
         (*totalOut)->setStyleSheet("color:#9ab; font-size:12px;");
+        auto *legend = new QLabel(QStringLiteral("<span style='color:%1'>↑ %2</span>   <span style='color:%3'>↓ %4</span>")
+                                      .arg(up.name(), upName, down.name(), dnName),
+                                  box);
+        legend->setStyleSheet("font-size:11px;");
         *chartOut = new TrafficSparkline(box);
         (*chartOut)->setColors(up, down);
         vl->addWidget(t);
         vl->addWidget(*speedOut);
         vl->addWidget(*totalOut);
+        vl->addWidget(legend);
         vl->addWidget(*chartOut, 1);
         return box;
     };
 
-    speedRow->addWidget(makeCard(tr("Proxied"), &proxySpeed, &proxyTotal, &proxyChart, QColor(255, 140, 60), QColor(56, 132, 255)), 1);
-    speedRow->addWidget(makeCard(tr("Direct"), &directSpeed, &directTotal, &directChart, QColor(255, 140, 60), QColor(46, 160, 67)), 1);
+    speedRow->addWidget(makeCard(tr("Proxied"), &proxySpeed, &proxyTotal, &proxyChart,
+                                 TrafficSparkline::colorProxyUp(), TrafficSparkline::colorProxyDown(),
+                                 tr("Proxy up"), tr("Proxy dn")),
+                        1);
+    speedRow->addWidget(makeCard(tr("Direct"), &directSpeed, &directTotal, &directChart,
+                                 TrafficSparkline::colorDirectUp(), TrafficSparkline::colorDirectDown(),
+                                 tr("Direct up"), tr("Direct dn")),
+                        1);
     layout->addLayout(speedRow, 1);
 
     auto *shareTitle = new QLabel(tr("Session volume share"), this);
@@ -119,7 +158,9 @@ StatsPanel::StatsPanel(QWidget *parent) : QWidget(parent) {
 
     auto *shareRow = new QHBoxLayout;
     proxyShare = new QLabel(tr("Proxy 0%"), this);
+    proxyShare->setStyleSheet(QStringLiteral("color:%1;").arg(TrafficSparkline::colorProxyDown().name()));
     directShare = new QLabel(tr("Direct 0%"), this);
+    directShare->setStyleSheet(QStringLiteral("color:%1;").arg(TrafficSparkline::colorDirectDown().name()));
     auto *bar = new ShareBarWidget(this);
     shareBar = bar;
     shareRow->addWidget(proxyShare);

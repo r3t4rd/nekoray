@@ -3,23 +3,34 @@
 #include <QWidget>
 #include <QLabel>
 #include <QVector>
-#include <QElapsedTimer>
+#include <QColor>
 
 class TrafficSparkline : public QWidget {
     Q_OBJECT
 public:
+    // Distinct palette shared by Advanced Stats + Simple Mode
+    static QColor colorProxyUp() { return QColor(255, 122, 69); }   // coral
+    static QColor colorProxyDown() { return QColor(76, 141, 255); } // blue
+    static QColor colorDirectUp() { return QColor(240, 200, 74); }  // gold
+    static QColor colorDirectDown() { return QColor(62, 207, 142); }// mint
+
     explicit TrafficSparkline(QWidget *parent = nullptr);
     void setSeries(const QVector<double> &up, const QVector<double> &down);
     void setColors(const QColor &up, const QColor &down);
+    void setMultiSeries(const QVector<QVector<double>> &series, const QVector<QColor> &colors);
+    void setTransparentBackground(bool on);
+    void setShowWindowLabel(bool on);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
 
 private:
-    QVector<double> upSeries;
-    QVector<double> downSeries;
-    QColor upColor = QColor(46, 160, 67);
-    QColor downColor = QColor(56, 132, 255);
+    QVector<QVector<double>> seriesList;
+    QVector<QColor> colorList;
+    QColor upColor = colorProxyUp();
+    QColor downColor = colorProxyDown();
+    bool transparentBg = false;
+    bool showLabel = true;
 };
 
 class ShareBarWidget;

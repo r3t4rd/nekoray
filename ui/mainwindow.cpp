@@ -115,7 +115,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->toolButton_update, &QToolButton::clicked, this, [=] { runOnNewThread([=] { CheckUpdate(); }); });
     connect(ui->toolButton_url_test, &QToolButton::clicked, this, [=] { speedtest_current_group(1, true); });
     connect(ui->toolButton_cancel_action, &QToolButton::clicked, this, [=] { cancelLastAction(); });
-    connect(ui->toolButton_mini_mode, &QToolButton::clicked, this, &MainWindow::showSimpleMode);
+    if (ui->toolButton_mini_mode) ui->toolButton_mini_mode->setVisible(false);
 
     setupNavigation();
 
@@ -171,6 +171,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 MessageBoxWarning(software_name, tr("Select a server first"));
                 simpleMode->refreshPowerState();
                 return;
+            }
+            // Simple Mode always uses Default Outbound = bypass
+            if (NekoGui::dataStore->routing &&
+                NekoGui::dataStore->routing->def_outbound != QStringLiteral("bypass")) {
+                NekoGui::dataStore->routing->def_outbound = QStringLiteral("bypass");
+                NekoGui::dataStore->routing->Save();
+                if (pageRoutes) pageRoutes->UpdateDisplayRouting(NekoGui::dataStore->routing.get(), false);
             }
             NekoGui::dataStore->simple_last_profile_id = profileId;
             NekoGui::dataStore->remember_id = profileId;
@@ -736,6 +743,33 @@ void MainWindow::setupNavigation() {
         "  color: white;"
         "}");
 
+    // Left column: SimpleMode button above Proxies tree
+    navColumn = new QWidget(ui->centralwidget);
+    navColumn->setObjectName("navColumn");
+    navColumn->setStyleSheet("#navColumn { background: #1e1f24; }");
+    navColumn->setMinimumWidth(200);
+    navColumn->setMaximumWidth(280);
+    auto *navColLay = new QVBoxLayout(navColumn);
+    navColLay->setContentsMargins(8, 10, 8, 8);
+    navColLay->setSpacing(8);
+
+    auto *simpleModeNavBtn = new QPushButton(tr("SimpleMode"), navColumn);
+    simpleModeNavBtn->setCursor(Qt::PointingHandCursor);
+    simpleModeNavBtn->setFixedHeight(34);
+    simpleModeNavBtn->setStyleSheet(
+        "QPushButton {"
+        "  background: #2b3348;"
+        "  color: #f0f3ff;"
+        "  border: 1px solid #4a5f8f;"
+        "  border-radius: 8px;"
+        "  font-weight: 700;"
+        "  font-size: 13px;"
+        "}"
+        "QPushButton:hover { background: #36405a; }");
+    connect(simpleModeNavBtn, &QPushButton::clicked, this, &MainWindow::showSimpleMode);
+    navColLay->addWidget(simpleModeNavBtn);
+    navColLay->addWidget(navTree, 1);
+
     pageStack = new QStackedWidget(ui->centralwidget);
     pageStack->addWidget(pageProxies); // index 0
 
@@ -794,13 +828,28 @@ void MainWindow::setupNavigation() {
         return item;
     };
 
+    auto styleCategory = [](QTreeWidgetItem *item) {
+        if (!item) return;
+        // Categories are headers only — not selectable / not navigable
+        item->setFlags((item->flags() | Qt::ItemIsEnabled) & ~Qt::ItemIsSelectable);
+        QFont f = item->font(0);
+        f.setBold(true);
+        f.setPointSize(f.pointSize() + 1);
+        item->setFont(0, f);
+        item->setForeground(0, QBrush(QColor(160, 175, 210)));
+        item->setBackground(0, QBrush(QColor(36, 40, 52)));
+        item->setData(0, Qt::UserRole + 2, true); // isCategory
+    };
+
     addNav(nullptr, tr("Proxies"), "proxies");
 
     auto *pref = addNav(nullptr, tr("Preferences"), "preferences");
     pref->setExpanded(true);
+    styleCategory(pref);
 
     auto *basic = addNav(pref, tr("Basic Settings"), "basic", 0);
     basic->setExpanded(true);
+    styleCategory(basic);
     addNav(basic, tr("Common"), "basic", 0);
     addNav(basic, tr("Style"), "basic", 1);
     addNav(basic, tr("Subscription"), "basic", 2);
@@ -812,6 +861,7 @@ void MainWindow::setupNavigation() {
 
     auto *routes = addNav(pref, tr("Routes"), "routes", 0);
     routes->setExpanded(true);
+    styleCategory(routes);
     addNav(routes, tr("Common"), "routes", 0);
     addNav(routes, tr("DNS"), "routes", 1);
     addNav(routes, tr("Simple Route"), "routes", 2);
@@ -822,6 +872,10 @@ void MainWindow::setupNavigation() {
 
     connect(navTree, &QTreeWidget::itemClicked, this, [=](QTreeWidgetItem *item, int) {
         if (!item) return;
+        // Category headers are decorative — only leaf entries navigate
+        if (item->data(0, Qt::UserRole + 2).toBool() || item->childCount() > 0) {
+            return;
+        }
         navigateTo(item->data(0, Qt::UserRole).toString(), item->data(0, Qt::UserRole + 1).toInt());
     });
 
@@ -835,7 +889,7 @@ void MainWindow::setupNavigation() {
     auto *shell = new QHBoxLayout(ui->centralwidget);
     shell->setContentsMargins(0, 0, 0, 0);
     shell->setSpacing(0);
-    shell->addWidget(navTree);
+    shell->addWidget(navColumn);
     shell->addWidget(pageStack, 1);
 
     navigateTo("proxies");
@@ -878,13 +932,16 @@ void MainWindow::navigateTo(const QString &pageId, int section) {
 
     pageStack->setCurrentWidget(target);
 
-    // Sync tree selection
+    // Sync tree selection (prefer leaf items, skip category headers)
     if (navTree) {
         QTreeWidgetItemIterator it(navTree);
         while (*it) {
-            if ((*it)->data(0, Qt::UserRole).toString() == pageId &&
-                (section < 0 || (*it)->data(0, Qt::UserRole + 1).toInt() == section)) {
-                navTree->setCurrentItem(*it);
+            auto *item = *it;
+            if (!item->data(0, Qt::UserRole + 2).toBool() &&
+                item->childCount() == 0 &&
+                item->data(0, Qt::UserRole).toString() == pageId &&
+                (section < 0 || item->data(0, Qt::UserRole + 1).toInt() == section)) {
+                navTree->setCurrentItem(item);
                 break;
             }
             ++it;
@@ -967,6 +1024,15 @@ void MainWindow::showAdvancedMode() {
 
 void MainWindow::applyUiMode(bool simple) {
     NekoGui::dataStore->ui_simple_mode = simple;
+
+    // Simple Mode always forces Default Outbound = bypass (Routes / final outbound)
+    if (simple && NekoGui::dataStore->routing) {
+        if (NekoGui::dataStore->routing->def_outbound != QStringLiteral("bypass")) {
+            NekoGui::dataStore->routing->def_outbound = QStringLiteral("bypass");
+            NekoGui::dataStore->routing->Save();
+            if (pageRoutes) pageRoutes->UpdateDisplayRouting(NekoGui::dataStore->routing.get(), false);
+        }
+    }
     NekoGui::dataStore->Save();
 
     auto *shell = qobject_cast<QHBoxLayout *>(ui->centralwidget->layout());
@@ -979,7 +1045,8 @@ void MainWindow::applyUiMode(bool simple) {
                 NekoGui::dataStore->mw_size = QStringLiteral("%1x%2").arg(advancedSizeHint.width()).arg(advancedSizeHint.height());
             }
         }
-        if (navTree) navTree->hide();
+        if (navColumn) navColumn->hide();
+        else if (navTree) navTree->hide();
         if (pageStack) pageStack->hide();
         if (simpleMode->parent() != ui->centralwidget) {
             simpleMode->setParent(ui->centralwidget);
@@ -999,7 +1066,8 @@ void MainWindow::applyUiMode(bool simple) {
         resize(412, 640);
     } else {
         if (simpleMode) simpleMode->hide();
-        if (navTree) navTree->show();
+        if (navColumn) navColumn->show();
+        else if (navTree) navTree->show();
         if (pageStack) pageStack->show();
 
         setMinimumSize(800, 600);
@@ -2067,6 +2135,9 @@ void MainWindow::updateTrafficCharts(qint64 proxyUpRate, qint64 proxyDownRate,
     if (statsPanel) {
         statsPanel->pushSample(proxyUpRate, proxyDownRate, directUpRate, directDownRate,
                                proxyUpTotal, proxyDownTotal, directUpTotal, directDownTotal);
+    }
+    if (simpleMode && simpleMode->isVisible()) {
+        simpleMode->pushTrafficSample(proxyUpRate, proxyDownRate, directUpRate, directDownRate);
     }
 }
 

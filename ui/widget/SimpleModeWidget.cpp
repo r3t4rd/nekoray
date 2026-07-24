@@ -1,11 +1,16 @@
 #include "SimpleModeWidget.h"
+#include "StatsPanel.h"
+
+
 
 #include "db/Database.hpp"
 #include "main/NekoGui.hpp"
 
+
 #include <QPainter>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QPushButton>
 #include <QLabel>
 #include <QScrollArea>
@@ -15,6 +20,9 @@
 #include <QMouseEvent>
 #include <QPalette>
 #include <QSizePolicy>
+#include <QFontMetrics>
+
+
 
 static void makeTransparent(QWidget *w) {
     if (!w) return;
@@ -26,9 +34,13 @@ static void makeTransparent(QWidget *w) {
     w->setPalette(pal);
 }
 
+
+
 SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
     setObjectName("SimpleModeWidget");
     setAttribute(Qt::WA_OpaquePaintEvent, true);
+
+
 
     advancedBtn = new QPushButton(tr("Advanced"), this);
     bgBtn = new QPushButton(tr("Theme"), this);
@@ -38,6 +50,18 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
         b->setFixedHeight(28);
         applyChromeButtonStyle(b);
     }
+
+
+
+    speedProxy = new QLabel(this);
+    speedDirect = new QLabel(this);
+    for (auto *l: {speedProxy, speedDirect}) {
+        l->setAlignment(Qt::AlignCenter);
+        l->setStyleSheet("font-size: 11px; font-weight: 600; background: transparent;");
+    }
+    updateSpeedLabels(0, 0, 0, 0);
+
+
 
     hero = new QFrame(this);
     hero->setObjectName("heroBlock");
@@ -49,25 +73,76 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
         "  border-radius: 18px;"
         "  border: 1px solid rgba(255,255,255,35);"
         "}");
-    auto *heroLay = new QVBoxLayout(hero);
-    heroLay->setContentsMargins(16, 12, 16, 12);
-    heroLay->setSpacing(0);
-    heroTitle = new QLabel(tr("Подключись"), hero);
+
+
+
+    auto *heroGrid = new QGridLayout(hero);
+    heroGrid->setContentsMargins(10, 8, 10, 8);
+    heroGrid->setSpacing(0);
+
+
+
+    heroChart = new TrafficSparkline(hero);
+    heroChart->setTransparentBackground(true);
+    heroChart->setShowWindowLabel(false);
+    heroChart->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    heroChart->setMinimumHeight(40);
+
+
+
+    auto *overlay = new QWidget(hero);
+    overlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    makeTransparent(overlay);
+    auto *overlayLay = new QVBoxLayout(overlay);
+    overlayLay->setContentsMargins(8, 4, 8, 4);
+    overlayLay->setSpacing(2);
+
+
+
+    heroTitle = new QLabel(tr("Подключись"), overlay);
     heroTitle->setAlignment(Qt::AlignCenter);
+    heroTitle->setWordWrap(true);
     heroTitle->setStyleSheet(
         "color: #ffffff;"
-        "font-size: 22px;"
         "font-weight: 700;"
         "letter-spacing: 1px;"
         "background: transparent;");
-    heroLay->addStretch(1);
-    heroLay->addWidget(heroTitle);
-    heroLay->addStretch(1);
+
+
+
+    heroLegend = new QLabel(overlay);
+    heroLegend->setAlignment(Qt::AlignCenter);
+    heroLegend->setText(QStringLiteral(
+        "<span style='color:%1'>P↑</span> "
+        "<span style='color:%2'>P↓</span> "
+        "<span style='color:%3'>D↑</span> "
+        "<span style='color:%4'>D↓</span>")
+                            .arg(TrafficSparkline::colorProxyUp().name(),
+                                 TrafficSparkline::colorProxyDown().name(),
+                                 TrafficSparkline::colorDirectUp().name(),
+                                 TrafficSparkline::colorDirectDown().name()));
+    heroLegend->setStyleSheet("font-size: 10px; font-weight: 600; background: transparent;");
+
+
+
+    overlayLay->addStretch(1);
+    overlayLay->addWidget(heroTitle);
+    overlayLay->addWidget(heroLegend);
+    overlayLay->addStretch(1);
+
+
+
+    heroGrid->addWidget(heroChart, 0, 0);
+    heroGrid->addWidget(overlay, 0, 0);
+
+
 
     // Status lives under the hero block (not inside it)
     heroSub = new QLabel(tr("Not connected"), this);
     heroSub->setAlignment(Qt::AlignCenter);
     heroSub->setStyleSheet("color: #e8a4a4; font-size: 13px; font-weight: 600; background: transparent;");
+
+
 
     serverScroll = new QScrollArea(this);
     serverScroll->setObjectName("serverScroll");
@@ -89,6 +164,8 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }");
 
+
+
     serverListHost = new QWidget;
     serverListHost->setObjectName("serverListHost");
     makeTransparent(serverListHost);
@@ -100,14 +177,27 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
     serverListLayout->setAlignment(Qt::AlignTop);
     serverScroll->setWidget(serverListHost);
 
+
+
     connect(advancedBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestAdvancedMode);
     connect(bgBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestToggleBackground);
     connect(rulesBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestEditRules);
+
+
+
+    proxyUpHist.reserve(kHistWindow);
+    proxyDownHist.reserve(kHistWindow);
+    directUpHist.reserve(kHistWindow);
+    directDownHist.reserve(kHistWindow);
+
+
 
     reloadBackground();
     refreshServers();
     refreshPowerState();
 }
+
+
 
 void SimpleModeWidget::applyChromeButtonStyle(QPushButton *b) {
     b->setStyleSheet(
@@ -121,6 +211,8 @@ void SimpleModeWidget::applyChromeButtonStyle(QPushButton *b) {
         "}"
         "QPushButton:hover { background: rgba(22,26,36,200); }");
 }
+
+
 
 void SimpleModeWidget::applyServerCardStyle(QPushButton *card, bool checked) {
     Q_UNUSED(checked)
@@ -144,6 +236,8 @@ void SimpleModeWidget::applyServerCardStyle(QPushButton *card, bool checked) {
         "}");
 }
 
+
+
 QRect SimpleModeWidget::mapDesignRect(int x, int y, int w, int h) const {
     if (width() <= 0 || height() <= 0) return {};
     double scale = qMax((double) width() / kDesignW, (double) height() / kDesignH);
@@ -154,6 +248,8 @@ QRect SimpleModeWidget::mapDesignRect(int x, int y, int w, int h) const {
     return QRect(qRound(ox + x * scale), qRound(oy + y * scale), qRound(w * scale), qRound(h * scale));
 }
 
+
+
 void SimpleModeWidget::reloadBackground() {
     int ver = NekoGui::dataStore->ui_simple_bg;
     if (ver != 2) ver = 1;
@@ -163,9 +259,58 @@ void SimpleModeWidget::reloadBackground() {
     update();
 }
 
+
+
 int SimpleModeWidget::selectedProfileId() const {
     return selectedId;
 }
+
+
+
+void SimpleModeWidget::updateSpeedLabels(qint64 proxyUpRate, qint64 proxyDownRate,
+                                         qint64 directUpRate, qint64 directDownRate) {
+    speedProxy->setText(QStringLiteral("<span style='color:%1'>Proxy ↑ %2</span>  "
+                                       "<span style='color:%3'>↓ %4</span>")
+                            .arg(TrafficSparkline::colorProxyUp().name(),
+                                 ReadableSize(proxyUpRate) + "/s",
+                                 TrafficSparkline::colorProxyDown().name(),
+                                 ReadableSize(proxyDownRate) + "/s"));
+    speedDirect->setText(QStringLiteral("<span style='color:%1'>Direct ↑ %2</span>  "
+                                        "<span style='color:%3'>↓ %4</span>")
+                             .arg(TrafficSparkline::colorDirectUp().name(),
+                                  ReadableSize(directUpRate) + "/s",
+                                  TrafficSparkline::colorDirectDown().name(),
+                                  ReadableSize(directDownRate) + "/s"));
+}
+
+
+
+void SimpleModeWidget::pushTrafficSample(qint64 proxyUpRate, qint64 proxyDownRate,
+                                         qint64 directUpRate, qint64 directDownRate) {
+    auto push = [](QVector<double> &v, double x) {
+        v.append(x);
+        while (v.size() > kHistWindow) v.removeFirst();
+    };
+    push(proxyUpHist, (double) proxyUpRate);
+    push(proxyDownHist, (double) proxyDownRate);
+    push(directUpHist, (double) directUpRate);
+    push(directDownHist, (double) directDownRate);
+
+
+
+    updateSpeedLabels(proxyUpRate, proxyDownRate, directUpRate, directDownRate);
+
+
+
+    if (heroChart) {
+        heroChart->setMultiSeries(
+            {proxyUpHist, proxyDownHist, directUpHist, directDownHist},
+            {TrafficSparkline::colorProxyUp(), TrafficSparkline::colorProxyDown(),
+             TrafficSparkline::colorDirectUp(), TrafficSparkline::colorDirectDown()});
+    }
+}
+
+
 
 void SimpleModeWidget::refreshServers() {
     // Fully clear layout — no leftover stretch / ghost widgets
@@ -176,17 +321,23 @@ void SimpleModeWidget::refreshServers() {
     }
     serverCards.clear();
 
+
+
     if (selectedId < 0) {
         selectedId = NekoGui::dataStore->simple_last_profile_id;
         if (selectedId < 0) selectedId = NekoGui::dataStore->remember_id;
         if (selectedId < 0) selectedId = NekoGui::dataStore->started_id;
     }
 
+
+
     auto group = NekoGui::profileManager->CurrentGroup();
     if (!group) {
         serverListHost->adjustSize();
         return;
     }
+
+
 
     for (const auto &pf: group->ProfilesWithOrder()) {
         auto *card = new QPushButton(pf->bean->DisplayName(), serverListHost);
@@ -197,6 +348,8 @@ void SimpleModeWidget::refreshServers() {
         card->setCursor(Qt::PointingHandCursor);
         card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         applyServerCardStyle(card, card->isChecked());
+
+
 
         connect(card, &QPushButton::clicked, this, [=] {
             selectedId = pf->id;
@@ -209,12 +362,48 @@ void SimpleModeWidget::refreshServers() {
             emit requestPowerToggle(true, selectedId);
         });
 
+
+
         serverListLayout->addWidget(card);
         serverCards << card;
     }
 
+
+
     serverListHost->adjustSize();
 }
+
+
+
+void SimpleModeWidget::fitHeroTitleFont() {
+    if (!heroTitle || !hero) return;
+    const QString text = heroTitle->text();
+    if (text.isEmpty()) return;
+
+
+
+    const int maxW = qMax(40, hero->width() - 36);
+    const int maxH = qMax(24, hero->height() / 2);
+    QFont f = heroTitle->font();
+    f.setBold(true);
+
+
+
+    int chosen = 10;
+    for (int pt = 24; pt >= 10; --pt) {
+        f.setPointSize(pt);
+        QFontMetrics fm(f);
+        QRect br = fm.boundingRect(QRect(0, 0, maxW, maxH * 2), Qt::AlignCenter | Qt::TextWordWrap, text);
+        if (br.width() <= maxW && br.height() <= maxH) {
+            chosen = pt;
+            break;
+        }
+    }
+    f.setPointSize(chosen);
+    heroTitle->setFont(f);
+}
+
+
 
 void SimpleModeWidget::updateHeroText() {
     bool on = NekoGui::dataStore->started_id >= 0;
@@ -229,7 +418,10 @@ void SimpleModeWidget::updateHeroText() {
         heroSub->setText(tr("Not connected"));
         heroSub->setStyleSheet("color: #e8a4a4; font-size: 13px; font-weight: 600; background: transparent;");
     }
+    fitHeroTitleFont();
 }
+
+
 
 void SimpleModeWidget::refreshPowerState() {
     bool on = NekoGui::dataStore->started_id >= 0;
@@ -241,6 +433,8 @@ void SimpleModeWidget::refreshPowerState() {
     }
     updateHeroText();
 }
+
+
 
 void SimpleModeWidget::paintEvent(QPaintEvent *) {
     QPainter p(this);
@@ -256,10 +450,14 @@ void SimpleModeWidget::paintEvent(QPaintEvent *) {
     }
 }
 
+
+
 void SimpleModeWidget::resizeEvent(QResizeEvent *e) {
     QWidget::resizeEvent(e);
     rebuildChromeLayout();
 }
+
+
 
 bool SimpleModeWidget::eventFilter(QObject *obj, QEvent *event) {
     if (obj == hero && event->type() == QEvent::MouseButtonRelease) {
@@ -274,6 +472,8 @@ bool SimpleModeWidget::eventFilter(QObject *obj, QEvent *event) {
     return QWidget::eventFilter(obj, event);
 }
 
+
+
 void SimpleModeWidget::rebuildChromeLayout() {
     const int m = 12;
     advancedBtn->adjustSize();
@@ -286,11 +486,31 @@ void SimpleModeWidget::rebuildChromeLayout() {
     rulesBtn->raise();
     bgBtn->raise();
 
+
+
     QRect heroR = mapDesignRect(kHeroX, kHeroY, kHeroW, kHeroH);
-    heroR = heroR.intersected(rect().adjusted(8, 40, -8, -8));
-    if (heroR.height() < 56) heroR.setHeight(56);
+    heroR = heroR.intersected(rect().adjusted(8, 56, -8, -8));
+    if (heroR.height() < 72) heroR.setHeight(72);
     hero->setGeometry(heroR);
     hero->raise();
+    fitHeroTitleFont();
+
+
+
+    // Speeds sit just above the hero / server-name block
+    speedProxy->adjustSize();
+    speedDirect->adjustSize();
+    const int speedGap = 2;
+    const int speedH = speedProxy->sizeHint().height() + speedDirect->sizeHint().height() + speedGap;
+    const int speedY = qMax(m + 32, heroR.top() - speedH - 8);
+    const int speedW = qMin(width() - 24, qMax(heroR.width(), 220));
+    const int speedX = (width() - speedW) / 2;
+    speedProxy->setGeometry(speedX, speedY, speedW, speedProxy->sizeHint().height());
+    speedDirect->setGeometry(speedX, speedY + speedProxy->height() + speedGap, speedW, speedDirect->sizeHint().height());
+    speedProxy->raise();
+    speedDirect->raise();
+
+
 
     heroSub->adjustSize();
     const int subW = qMin(width() - 24, qMax(heroR.width(), heroSub->sizeHint().width() + 20));
@@ -298,6 +518,8 @@ void SimpleModeWidget::rebuildChromeLayout() {
     const int subY = heroR.bottom() + 8;
     heroSub->setGeometry(subX, subY, subW, heroSub->sizeHint().height());
     heroSub->raise();
+
+
 
     // Full-width list, max 30% of window, pinned to bottom — no phantom stretch
     const int listMaxH = qMax(72, (int) (height() * 0.30));
@@ -316,3 +538,5 @@ void SimpleModeWidget::rebuildChromeLayout() {
         serverScroll->hide();
     }
 }
+
+
