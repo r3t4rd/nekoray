@@ -61,8 +61,18 @@ func Updater() {
 	removeAll("./*.dll")
 	removeAll("./*.dmp")
 
-	// update move
-	err := Mv("./nekoray_update/nekoray", "./")
+	// Prefer official layout: zip root /nekoray/... ; also accept windows64/ or flat extract
+	src := FindExist([]string{
+		"./nekoray_update/nekoray",
+		"./nekoray_update/windows64",
+		"./nekoray_update",
+	})
+	if src == "./nekoray_update" && !Exist("./nekoray_update/nekobox.exe") && !Exist("./nekoray_update/nekobox") {
+		MessageBoxPlain("NekoGui Updater", "Update package layout is invalid (expected nekoray/ folder with nekobox.exe).")
+		log.Fatalln("invalid update package layout")
+	}
+
+	err := Mv(src, "./")
 	if err != nil {
 		MessageBoxPlain("NekoGui Updater", "Update failed. Please close the running instance and run the updater again.\n\n"+err.Error())
 		log.Fatalln(err.Error())
