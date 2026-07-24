@@ -320,7 +320,17 @@ void MainWindow::neko_start(int _id) {
         bool rpcOK;
         QString error = defaultClient->Start(&rpcOK, req);
         if (rpcOK && !error.isEmpty()) {
-            runOnUiThread([=] { MessageBoxWarning("LoadConfig return error", error); });
+            runOnUiThread([=] {
+                if (NekoGui::IsDeprecatedGeoError(error)) {
+                    // Silent fix + retry (no dialog)
+                    if (NekoGui::FixDeprecatedGeoInProfile(ent)) {
+                        MW_show_log(tr("Removed deprecated geoip/geosite from config, retrying…"));
+                        QTimer::singleShot(0, GetMainWindow(), [id = ent->id] { GetMainWindow()->neko_start(id); });
+                        return;
+                    }
+                }
+                MessageBoxWarning("LoadConfig return error", error);
+            });
             return false;
         } else if (!rpcOK) {
             return false;

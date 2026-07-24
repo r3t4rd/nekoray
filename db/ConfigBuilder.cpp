@@ -6,10 +6,149 @@
 #include <QApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 
 #define BOX_UNDERLYING_DNS dataStore->core_box_underlying_dns.isEmpty() ? "local" : dataStore->core_box_underlying_dns
 
 namespace NekoGui {
+
+    namespace {
+        bool ruleHasMatchersLeft(const QJsonObject &rule) {
+            auto copy = rule;
+            for (const auto &k: {QStringLiteral("outbound"), QStringLiteral("action"), QStringLiteral("server"),
+                                 QStringLiteral("disable_cache"), QStringLiteral("rewrite_ttl"),
+                                 QStringLiteral("client_subnet"), QStringLiteral("strategy")}) {
+                copy.remove(k);
+            }
+            return !copy.isEmpty();
+        }
+
+        bool stripDeprecatedKeysFromRules(QJsonArray &rules) {
+            bool changed = false;
+            QJsonArray kept;
+            for (const auto &v: rules) {
+                if (!v.isObject()) {
+                    kept += v;
+                    continue;
+                }
+                auto rule = v.toObject();
+                for (const auto &k: {QStringLiteral("geoip"), QStringLiteral("geosite"), QStringLiteral("source_geoip")}) {
+                    if (rule.contains(k)) {
+                        rule.remove(k);
+                        changed = true;
+                    }
+                }
+                if (!ruleHasMatchersLeft(rule)) {
+                    changed = true;
+                    continue;
+                }
+                kept += rule;
+            }
+            if (changed) rules = kept;
+            return changed;
+        }
+    } // namespace
+
+    bool IsDeprecatedGeoError(const QString &error) {
+        auto e = error.toLower();
+        return e.contains("geoip database is deprecated") || e.contains("geosite database is deprecated") ||
+               (e.contains("geoip") && e.contains("removed in sing-box")) ||
+               (e.contains("geosite") && e.contains("removed in sing-box"));
+    }
+
+    bool StripDeprecatedGeoBlocks(QJsonObject &root) {
+        bool changed = false;
+
+        auto stripRouteLike = [&](QJsonObject &obj) {
+            if (obj.contains("geoip")) {
+                obj.remove("geoip");
+                changed = true;
+            }
+            if (obj.contains("geosite")) {
+                obj.remove("geosite");
+                changed = true;
+            }
+            if (obj.contains("rules") && obj["rules"].isArray()) {
+                auto rules = obj["rules"].toArray();
+                if (stripDeprecatedKeysFromRules(rules)) {
+                    obj["rules"] = rules;
+                    changed = true;
+                }
+            }
+        };
+
+        if (root.contains("route") && root["route"].isObject()) {
+            auto route = root["route"].toObject();
+            stripRouteLike(route);
+            root["route"] = route;
+        }
+        if (root.contains("dns") && root["dns"].isObject()) {
+            auto dns = root["dns"].toObject();
+            if (dns.contains("rules") && dns["rules"].isArray()) {
+                auto rules = dns["rules"].toArray();
+                if (stripDeprecatedKeysFromRules(rules)) {
+                    dns["rules"] = rules;
+                    changed = true;
+                }
+            }
+            root["dns"] = dns;
+        }
+        // Custom Route JSON shape: { "rules": [ ... ] }
+        if (root.contains("rules") && root["rules"].isArray()) {
+            auto rules = root["rules"].toArray();
+            if (stripDeprecatedKeysFromRules(rules)) {
+                root["rules"] = rules;
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    bool StripDeprecatedGeoFromJsonString(QString &json) {
+        if (json.trimmed().isEmpty()) return false;
+        auto obj = QString2QJsonObject(json);
+        if (obj.isEmpty() && !json.trimmed().startsWith("{")) return false;
+        if (!StripDeprecatedGeoBlocks(obj)) return false;
+        json = QJsonObject2QString(obj, false);
+        return true;
+    }
+
+    bool FixDeprecatedGeoInProfile(const std::shared_ptr<ProxyEntity> &ent) {
+        if (ent == nullptr || ent->bean == nullptr) return false;
+        bool changed = false;
+
+        auto customBean = dynamic_cast<NekoGui_fmt::CustomBean *>(ent->bean.get());
+        if (customBean != nullptr && customBean->core == "internal-full") {
+            if (StripDeprecatedGeoFromJsonString(customBean->config_simple)) changed = true;
+        }
+        if (StripDeprecatedGeoFromJsonString(ent->bean->custom_config)) changed = true;
+
+        if (ScrubDeprecatedGeoFromRoutingStore()) changed = true;
+
+        if (changed) ent->Save();
+        return changed;
+    }
+
+    bool ScrubDeprecatedGeoFromRoutingStore() {
+        bool changed = false;
+        bool routingChanged = false;
+        if (dataStore->routing != nullptr) {
+            if (StripDeprecatedGeoFromJsonString(dataStore->routing->custom)) {
+                changed = true;
+                routingChanged = true;
+            }
+            if (dataStore->routing->use_dns_object && StripDeprecatedGeoFromJsonString(dataStore->routing->dns_object)) {
+                changed = true;
+                routingChanged = true;
+            }
+            if (routingChanged) dataStore->routing->Save();
+        }
+        if (StripDeprecatedGeoFromJsonString(dataStore->custom_route_global)) {
+            changed = true;
+            dataStore->Save();
+        }
+        return changed;
+    }
 
     QStringList getAutoBypassExternalProcessPaths(const std::shared_ptr<BuildConfigResult> &result) {
         QStringList paths;
@@ -71,6 +210,9 @@ namespace NekoGui {
     // Common
 
     std::shared_ptr<BuildConfigResult> BuildConfig(const std::shared_ptr<ProxyEntity> &ent, bool forTest, bool forExport) {
+        // Quietly cut deprecated geoip/geosite out of saved Custom Route JSON
+        if (!forTest) ScrubDeprecatedGeoFromRoutingStore();
+
         auto result = std::make_shared<BuildConfigResult>();
         auto status = std::make_shared<BuildConfigStatus>();
         status->ent = ent;
@@ -81,12 +223,24 @@ namespace NekoGui {
         auto customBean = dynamic_cast<NekoGui_fmt::CustomBean *>(ent->bean.get());
         if (customBean != nullptr && customBean->core == "internal-full") {
             result->coreConfig = QString2QJsonObject(customBean->config_simple);
+            // Quietly strip deprecated geo from full custom configs (persist if changed)
+            if (!forTest && StripDeprecatedGeoBlocks(result->coreConfig)) {
+                customBean->config_simple = QJsonObject2QString(result->coreConfig, false);
+                ent->Save();
+            }
         } else {
             BuildConfigSingBox(status);
         }
 
         // apply custom config
-        MergeJson(result->coreConfig, QString2QJsonObject(ent->bean->custom_config));
+        auto customCfg = QString2QJsonObject(ent->bean->custom_config);
+        if (!forTest && StripDeprecatedGeoBlocks(customCfg)) {
+            ent->bean->custom_config = QJsonObject2QString(customCfg, false);
+            ent->Save();
+        }
+        MergeJson(result->coreConfig, customCfg);
+        // Final safety: never send geoip/geosite matchers to core
+        StripDeprecatedGeoBlocks(result->coreConfig);
 
         return result;
     }
@@ -463,29 +617,58 @@ namespace NekoGui {
             IP_USER_RULE
         }
 
+        // sing-box 1.12+: geoip/geosite rule fields are removed → rule_set
+        QJsonArray routeRuleSets;
+        QSet<QString> routeRuleSetTags;
+        auto ensureRuleSet = [&](const QString &kind, const QString &name) -> QString {
+            const QString tag = kind + "-" + name;
+            if (routeRuleSetTags.contains(tag)) return tag;
+            routeRuleSetTags.insert(tag);
+            QString url;
+            if (kind == "geoip") {
+                url = QStringLiteral("https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-%1.srs").arg(name);
+            } else {
+                url = QStringLiteral("https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-%1.srs").arg(name);
+            }
+            routeRuleSets += QJsonObject{
+                {"tag", tag},
+                {"type", "remote"},
+                {"format", "binary"},
+                {"url", url},
+                {"download_detour", "direct"},
+            };
+            return tag;
+        };
+
         // sing-box common rule object
         auto make_rule = [&](const QStringList &list, bool isIP = false) {
             QJsonObject rule;
             //
             QJsonArray ip_cidr;
-            QJsonArray geoip;
+            QJsonArray rule_set;
+            bool ip_is_private = false;
             //
             QJsonArray domain_keyword;
             QJsonArray domain_subdomain;
             QJsonArray domain_regexp;
             QJsonArray domain_full;
-            QJsonArray geosite;
             for (auto item: list) {
                 if (isIP) {
                     if (item.startsWith("geoip:")) {
-                        geoip += item.replace("geoip:", "");
+                        auto code = item.mid(QStringLiteral("geoip:").size()).trimmed().toLower();
+                        if (code == "private") {
+                            ip_is_private = true;
+                        } else if (!code.isEmpty()) {
+                            rule_set += ensureRuleSet("geoip", code);
+                        }
                     } else {
                         ip_cidr += item;
                     }
                 } else {
                     // https://www.v2fly.org/config/dns.html#dnsobject
                     if (item.startsWith("geosite:")) {
-                        geosite += item.replace("geosite:", "");
+                        auto code = item.mid(QStringLiteral("geosite:").size()).trimmed();
+                        if (!code.isEmpty()) rule_set += ensureRuleSet("geosite", code);
                     } else if (item.startsWith("full:")) {
                         domain_full += item.replace("full:", "").toLower();
                     } else if (item.startsWith("domain:")) {
@@ -500,18 +683,19 @@ namespace NekoGui {
                 }
             }
             if (isIP) {
-                if (ip_cidr.isEmpty() && geoip.isEmpty()) return rule;
-                rule["ip_cidr"] = ip_cidr;
-                rule["geoip"] = geoip;
+                if (ip_cidr.isEmpty() && rule_set.isEmpty() && !ip_is_private) return rule;
+                if (!ip_cidr.isEmpty()) rule["ip_cidr"] = ip_cidr;
+                if (ip_is_private) rule["ip_is_private"] = true;
+                if (!rule_set.isEmpty()) rule["rule_set"] = rule_set;
             } else {
-                if (domain_keyword.isEmpty() && domain_subdomain.isEmpty() && domain_regexp.isEmpty() && domain_full.isEmpty() && geosite.isEmpty()) {
+                if (domain_keyword.isEmpty() && domain_subdomain.isEmpty() && domain_regexp.isEmpty() && domain_full.isEmpty() && rule_set.isEmpty()) {
                     return rule;
                 }
-                rule["domain"] = domain_full;
-                rule["domain_suffix"] = domain_subdomain; // v2ray Subdomain => sing-box suffix
-                rule["domain_keyword"] = domain_keyword;
-                rule["domain_regex"] = domain_regexp;
-                rule["geosite"] = geosite;
+                if (!domain_full.isEmpty()) rule["domain"] = domain_full;
+                if (!domain_subdomain.isEmpty()) rule["domain_suffix"] = domain_subdomain; // v2ray Subdomain => sing-box suffix
+                if (!domain_keyword.isEmpty()) rule["domain_keyword"] = domain_keyword;
+                if (!domain_regexp.isEmpty()) rule["domain_regex"] = domain_regexp;
+                if (!rule_set.isEmpty()) rule["rule_set"] = rule_set;
             }
             return rule;
         };
@@ -688,13 +872,11 @@ namespace NekoGui {
             }
         }
 
-        // geopath
-        auto geoip = FindCoreAsset("geoip.db");
-        auto geosite = FindCoreAsset("geosite.db");
-        if (geoip.isEmpty()) status->result->error = +"geoip.db not found";
-        if (geosite.isEmpty()) status->result->error = +"geosite.db not found";
+        // geopath assets are optional now (UI autocomplete / legacy); routing uses remote rule-set
+        Q_UNUSED(FindCoreAsset("geoip.db"));
+        Q_UNUSED(FindCoreAsset("geosite.db"));
 
-        // final add routing rule (normalize legacy special outbounds in custom rules)
+        // final add routing rule (normalize legacy special outbounds + deprecated geo fields in custom rules)
         auto routingRules = QString2QJsonObject(dataStore->routing->custom)["rules"].toArray();
         if (status->forTest) routingRules = {};
         if (!status->forTest) QJSONARRAY_ADD(routingRules, QString2QJsonObject(dataStore->custom_route_global)["rules"].toArray())
@@ -710,28 +892,22 @@ namespace NekoGui {
                 rule.remove("outbound");
                 rule["action"] = "hijack-dns";
             }
+
+            // Quietly cut deprecated geoip/geosite/source_geoip (do not convert — drop the rule if empty)
+            for (const auto &k: {QStringLiteral("geoip"), QStringLiteral("geosite"), QStringLiteral("source_geoip")}) {
+                rule.remove(k);
+            }
+            if (!ruleHasMatchersLeft(rule)) continue;
             normalizedRules += rule;
         }
         auto routeObj = QJsonObject{
             {"rules", normalizedRules},
             {"auto_detect_interface", dataStore->spmode_vpn}, // TODO force enable?
             {"find_process", !status->forTest},
-            {
-                "geoip",
-                QJsonObject{
-                    {"path", geoip},
-                },
-            },
-            {
-                "geosite",
-                QJsonObject{
-                    {"path", geosite},
-                },
-            }};
+        };
+        if (!routeRuleSets.isEmpty()) routeObj["rule_set"] = routeRuleSets;
         if (!status->forTest) routeObj["final"] = dataStore->routing->def_outbound;
         if (status->forExport) {
-            routeObj.remove("geoip");
-            routeObj.remove("geosite");
             routeObj.remove("auto_detect_interface");
         }
         status->result->coreConfig.insert("route", routeObj);
@@ -746,6 +922,10 @@ namespace NekoGui {
                 {"external_ui", "dashboard"},
             };
             experimentalObj["clash_api"] = clash_api;
+        }
+        // required for remote rule-set downloads
+        if (!routeRuleSets.isEmpty()) {
+            experimentalObj["cache_file"] = QJsonObject{{"enabled", true}};
         }
 
         if (!experimentalObj.isEmpty()) status->result->coreConfig.insert("experimental", experimentalObj);

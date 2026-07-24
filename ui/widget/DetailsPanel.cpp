@@ -8,8 +8,11 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QMap>
+#include <QSet>
+#include <QScrollBar>
 #include <QJsonObject>
 #include <algorithm>
+#include <functional>
 
 namespace {
 
@@ -34,8 +37,20 @@ QString fmtLast(qint64 ts) {
     return QDateTime::fromSecsSinceEpoch(ts).toString("HH:mm:ss");
 }
 
+void mergeTag(AggNode *node, const QString &tag) {
+    if (tag.isEmpty() || node == nullptr) return;
+    if (node->tag.isEmpty()) {
+        node->tag = tag;
+        return;
+    }
+    if (node->tag == tag) return;
+    const auto parts = node->tag.split('/');
+    if (!parts.contains(tag)) node->tag += "/" + tag;
+}
+
 void addConn(AggNode &root, const QStringList &path, const QJsonObject &obj) {
     AggNode *cur = &root;
+    const QString tag = obj["Tag"].toString();
     for (int i = 0; i < path.size(); ++i) {
         const QString &k = path[i];
         if (!cur->children.contains(k)) {
@@ -53,9 +68,7 @@ void addConn(AggNode &root, const QStringList &path, const QJsonObject &obj) {
         if (last > cur->lastSeen) cur->lastSeen = last;
         cur->total += 1;
         if (obj["Active"].toBool()) cur->active += 1;
-        if (i == path.size() - 1) {
-            cur->tag = obj["Tag"].toString();
-        }
+        mergeTag(cur, tag);
     }
 }
 
@@ -77,7 +90,8 @@ QList<AggNode *> sortedChildren(AggNode &node, int sortMode) {
     return list;
 }
 
-void fillTree(QTreeWidget *tree, QTreeWidgetItem *parent, AggNode &node, int sortMode, int depth) {
+void fillTree(QTreeWidget *tree, QTreeWidgetItem *parent, AggNode &node, int sortMode, int depth,
+              const QString &parentPath, const QSet<QString> &expandedKeys, bool hadSavedState) {
     auto kids = sortedChildren(node, sortMode);
     for (AggNode *c: kids) {
         auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(tree);
@@ -90,14 +104,24 @@ void fillTree(QTreeWidget *tree, QTreeWidgetItem *parent, AggNode &node, int sor
         if (c->active > 0) status = QObject::tr("%1 active").arg(c->active);
         else status = QObject::tr("idle");
 
+        const QString pathKey = parentPath.isEmpty() ? c->key : (parentPath + QChar(1) + c->key);
+        item->setData(0, Qt::UserRole, pathKey);
         item->setText(0, prefix + c->title);
         item->setText(1, c->tag);
         item->setText(2, status);
         item->setText(3, fmtLast(c->lastSeen));
         item->setText(4, fmtTraffic(c->upload, c->download));
         item->setToolTip(0, c->title);
-        item->setExpanded(depth < 1);
-        fillTree(tree, item, *c, sortMode, depth + 1);
+
+        if (expandedKeys.contains(pathKey)) {
+            item->setExpanded(true);
+        } else if (!hadSavedState && depth < 1) {
+            item->setExpanded(true);
+        } else {
+            item->setExpanded(false);
+        }
+
+        fillTree(tree, item, *c, sortMode, depth + 1, pathKey, expandedKeys, hadSavedState);
     }
 }
 
@@ -118,6 +142,20 @@ void filterNode(AggNode &node, const QString &q) {
         else filterNode(it.value(), q);
     }
     for (const auto &k: remove) node.children.remove(k);
+}
+
+QSet<QString> collectExpandedKeys(QTreeWidget *tree) {
+    QSet<QString> keys;
+    std::function<void(QTreeWidgetItem *)> walk = [&](QTreeWidgetItem *it) {
+        if (it == nullptr) return;
+        if (it->isExpanded()) {
+            const auto k = it->data(0, Qt::UserRole).toString();
+            if (!k.isEmpty()) keys.insert(k);
+        }
+        for (int i = 0; i < it->childCount(); ++i) walk(it->child(i));
+    };
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) walk(tree->topLevelItem(i));
+    return keys;
 }
 
 } // namespace
@@ -179,6 +217,12 @@ void DetailsPanel::updateConnections(const QJsonArray &arr) {
 }
 
 void DetailsPanel::rebuildTree() {
+    const QSet<QString> expandedKeys = collectExpandedKeys(tree);
+    const bool hadSavedState = !expandedKeys.isEmpty();
+    const int scrollPos = tree->verticalScrollBar() ? tree->verticalScrollBar()->value() : 0;
+    QString selectedKey;
+    if (auto *sel = tree->currentItem()) selectedKey = sel->data(0, Qt::UserRole).toString();
+
     tree->clear();
     AggNode root;
     root.title = "root";
@@ -228,7 +272,22 @@ void DetailsPanel::rebuildTree() {
     }
 
     filterNode(root, query);
-    fillTree(tree, nullptr, root, sortMode, 0);
+    fillTree(tree, nullptr, root, sortMode, 0, {}, expandedKeys, hadSavedState);
+
+    if (!selectedKey.isEmpty()) {
+        std::function<QTreeWidgetItem *(QTreeWidgetItem *)> find = [&](QTreeWidgetItem *it) -> QTreeWidgetItem * {
+            if (it == nullptr) return nullptr;
+            if (it->data(0, Qt::UserRole).toString() == selectedKey) return it;
+            for (int i = 0; i < it->childCount(); ++i) {
+                if (auto *f = find(it->child(i))) return f;
+            }
+            return nullptr;
+        };
+        QTreeWidgetItem *found = nullptr;
+        for (int i = 0; i < tree->topLevelItemCount() && !found; ++i) found = find(tree->topLevelItem(i));
+        if (found) tree->setCurrentItem(found);
+    }
+    if (tree->verticalScrollBar()) tree->verticalScrollBar()->setValue(scrollPos);
 
     summary->setText(tr("Connections: %1 (%2 active)  •  %3")
                          .arg(connCount)

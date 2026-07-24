@@ -56,4 +56,11 @@ namespace NekoGui {
     QString WriteVPNSingBoxConfig();
 
     QString WriteVPNLinuxScript(const QString &configPath);
+
+    // sing-box 1.12+: strip removed geoip/geosite/source_geoip blocks from JSON configs
+    bool IsDeprecatedGeoError(const QString &error);
+    bool StripDeprecatedGeoBlocks(QJsonObject &root);
+    bool StripDeprecatedGeoFromJsonString(QString &json);
+    bool FixDeprecatedGeoInProfile(const std::shared_ptr<ProxyEntity> &ent);
+    bool ScrubDeprecatedGeoFromRoutingStore();
 } // namespace NekoGui
