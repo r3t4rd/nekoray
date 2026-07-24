@@ -82,16 +82,8 @@
             "server_port": %PORT%
         },
         {
-            "type": "block",
-            "tag": "block"
-        },
-        {
             "type": "direct",
             "tag": "direct"
-        },
-        {
-            "type": "dns",
-            "tag": "dns-out"
         }
     ],
     "route": {
@@ -107,21 +99,21 @@
                     139,
                     5353
                 ],
-                "outbound": "block"
+                "action": "reject"
             },
             {
                 "ip_cidr": [
                     "224.0.0.0/3",
                     "ff00::/8"
                 ],
-                "outbound": "block"
+                "action": "reject"
             },
             {
                 "source_ip_cidr": [
                     "224.0.0.0/3",
                     "ff00::/8"
                 ],
-                "outbound": "block"
+                "action": "reject"
             },
             {
                 "port": 53,
@@ -129,7 +121,7 @@
                     "nekoray_core",
                     "nekoray_core.exe"
                 ],
-                "outbound": "dns-out"
+                "action": "hijack-dns"
             },
             {
                 "process_name": [
@@ -145,7 +137,7 @@
             ,
             {
                 "port": 53,
-                "outbound": "dns-out"
+                "action": "hijack-dns"
             }
         ]
     }

@@ -21,6 +21,7 @@ namespace NekoGui {
 #include <QShortcut>
 #include <QSemaphore>
 #include <QMutex>
+#include <atomic>
 
 #include "GroupSort.hpp"
 
@@ -178,7 +179,22 @@ private:
     QMutex mu_stopping;
     QMutex mu_exit;
     QSemaphore sem_stopped;
+    std::atomic_bool mu_starting_held{false};
+    std::atomic_bool mu_stopping_held{false};
+    std::atomic_bool action_cancelled{false};
     int exit_reason = 0;
+
+    void cancelLastAction();
+
+    bool tryLockStarting();
+
+    void unlockStarting();
+
+    bool tryLockStopping();
+
+    void unlockStopping();
+
+    void forceUnlockActions();
 
     QList<std::shared_ptr<NekoGui::ProxyEntity>> get_now_selected_list();
 

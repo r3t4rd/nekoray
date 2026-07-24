@@ -172,6 +172,19 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="QToolButton" name="toolButton_cancel_action">
+        <property name="text">
+         <string>Cancel</string>
+        </property>
+        <property name="toolTip">
+         <string>Cancel last start/stop/test action</string>
+        </property>
+        <property name="toolButtonStyle">
+         <enum>Qt::ToolButtonTextUnderIcon</enum>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
     <item>

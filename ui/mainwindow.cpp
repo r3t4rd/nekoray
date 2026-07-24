@@ -110,6 +110,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->menubar->setVisible(false);
     connect(ui->toolButton_update, &QToolButton::clicked, this, [=] { runOnNewThread([=] { CheckUpdate(); }); });
     connect(ui->toolButton_url_test, &QToolButton::clicked, this, [=] { speedtest_current_group(1, true); });
+    connect(ui->toolButton_cancel_action, &QToolButton::clicked, this, [=] { cancelLastAction(); });
 
     setupNavigation();
 

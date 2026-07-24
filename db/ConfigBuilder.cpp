@@ -440,7 +440,7 @@ namespace NekoGui {
         auto tagProxy = BuildChain(0, status);
         if (!status->result->error.isEmpty()) return;
 
-        // direct & bypass & block
+        // direct & bypass (block/dns special outbounds removed — use rule actions)
         status->outbounds += QJsonObject{
             {"type", "direct"},
             {"tag", "direct"},
@@ -449,16 +449,6 @@ namespace NekoGui {
             {"type", "direct"},
             {"tag", "bypass"},
         };
-        status->outbounds += QJsonObject{
-            {"type", "block"},
-            {"tag", "block"},
-        };
-        if (!status->forTest) {
-            status->outbounds += QJsonObject{
-                {"type", "dns"},
-                {"tag", "dns-out"},
-            };
-        }
 
         // custom inbound
         if (!status->forTest) QJSONARRAY_ADD(status->inbounds, QString2QJsonObject(dataStore->custom_inbound)["inbounds"].toArray())
@@ -626,11 +616,11 @@ namespace NekoGui {
 
         // Routing
 
-        // dns hijack
+        // dns hijack (rule action; legacy dns outbound removed in sing-box 1.11+)
         if (!status->forTest) {
             status->routingRules += QJsonObject{
                 {"protocol", "dns"},
-                {"outbound", "dns-out"},
+                {"action", "hijack-dns"},
             };
         }
 
@@ -638,7 +628,11 @@ namespace NekoGui {
         auto add_rule_route = [&](const QStringList &list, bool isIP, const QString &out) {
             auto rule = make_rule(list, isIP);
             if (rule.isEmpty()) return;
-            rule["outbound"] = out;
+            if (out == "block") {
+                rule["action"] = "reject";
+            } else {
+                rule["outbound"] = out;
+            }
             status->routingRules += rule;
         };
 
@@ -654,15 +648,15 @@ namespace NekoGui {
         status->routingRules += QJsonObject{
             {"network", "udp"},
             {"port", QJsonArray{135, 137, 138, 139, 5353}},
-            {"outbound", "block"},
+            {"action", "reject"},
         };
         status->routingRules += QJsonObject{
             {"ip_cidr", QJsonArray{"224.0.0.0/3", "ff00::/8"}},
-            {"outbound", "block"},
+            {"action", "reject"},
         };
         status->routingRules += QJsonObject{
             {"source_ip_cidr", QJsonArray{"224.0.0.0/3", "ff00::/8"}},
-            {"outbound", "block"},
+            {"action", "reject"},
         };
 
         // tun user rule
@@ -699,13 +693,26 @@ namespace NekoGui {
         if (geoip.isEmpty()) status->result->error = +"geoip.db not found";
         if (geosite.isEmpty()) status->result->error = +"geosite.db not found";
 
-        // final add routing rule
+        // final add routing rule (normalize legacy special outbounds in custom rules)
         auto routingRules = QString2QJsonObject(dataStore->routing->custom)["rules"].toArray();
         if (status->forTest) routingRules = {};
         if (!status->forTest) QJSONARRAY_ADD(routingRules, QString2QJsonObject(dataStore->custom_route_global)["rules"].toArray())
         QJSONARRAY_ADD(routingRules, status->routingRules)
+        QJsonArray normalizedRules;
+        for (const auto &item: routingRules) {
+            auto rule = item.toObject();
+            auto out = rule.value("outbound").toString();
+            if (out == "block") {
+                rule.remove("outbound");
+                rule["action"] = "reject";
+            } else if (out == "dns-out" || out == "dns") {
+                rule.remove("outbound");
+                rule["action"] = "hijack-dns";
+            }
+            normalizedRules += rule;
+        }
         auto routeObj = QJsonObject{
-            {"rules", routingRules},
+            {"rules", normalizedRules},
             {"auto_detect_interface", dataStore->spmode_vpn}, // TODO force enable?
             {
                 "geoip",

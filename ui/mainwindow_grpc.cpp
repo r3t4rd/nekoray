@@ -348,16 +348,16 @@ void MainWindow::neko_start(int _id) {
         return true;
     };
 
-    if (!mu_starting.tryLock()) {
+    if (!tryLockStarting()) {
         MessageBoxWarning(software_name, "Another profile is starting...");
         return;
     }
-    if (!mu_stopping.tryLock()) {
+    if (!tryLockStopping()) {
         MessageBoxWarning(software_name, "Another profile is stopping...");
-        mu_starting.unlock();
+        unlockStarting();
         return;
     }
-    mu_stopping.unlock();
+    unlockStopping();
 
     // check core state
     if (!NekoGui::dataStore->core_running) {
@@ -368,9 +368,11 @@ void MainWindow::neko_start(int _id) {
                 core_process->Restart();
             },
             DS_cores);
-        mu_starting.unlock();
+        unlockStarting();
         return; // let CoreProcess call neko_start when core is up
     }
+
+    action_cancelled = false;
 
     // timeout message
     auto restartMsgbox = new QMessageBox(QMessageBox::Question, software_name, tr("If there is no response for a long time, it is recommended to restart the software."),
@@ -384,12 +386,22 @@ void MainWindow::neko_start(int _id) {
             runOnUiThread([=] { neko_stop(false, true); });
             sem_stopped.acquire();
         }
+        if (action_cancelled) {
+            MW_show_log("<<<<<<<< " + tr("Start cancelled"));
+            unlockStarting();
+            runOnUiThread([=] {
+                restartMsgboxTimer->cancel();
+                restartMsgboxTimer->deleteLater();
+                restartMsgbox->deleteLater();
+            });
+            return;
+        }
         // do start
         MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(ent->bean->DisplayTypeAndName()));
         if (!neko_start_stage2()) {
             MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(ent->bean->DisplayTypeAndName()));
         }
-        mu_starting.unlock();
+        unlockStarting();
         // cancel timeout
         runOnUiThread([=] {
             restartMsgboxTimer->cancel();
@@ -459,10 +471,12 @@ void MainWindow::neko_stop(bool crash, bool sem) {
         return true;
     };
 
-    if (!mu_stopping.tryLock()) {
+    if (!tryLockStopping()) {
         if (sem) sem_stopped.release();
         return;
     }
+
+    action_cancelled = false;
 
     // timeout message
     auto restartMsgbox = new QMessageBox(QMessageBox::Question, software_name, tr("If there is no response for a long time, it is recommended to restart the software."),
@@ -476,7 +490,7 @@ void MainWindow::neko_stop(bool crash, bool sem) {
         if (!neko_stop_stage2()) {
             MW_show_log("<<<<<<<< " + tr("Failed to stop, please restart the program."));
         }
-        mu_stopping.unlock();
+        unlockStopping();
         if (sem) sem_stopped.release();
         // cancel timeout
         runOnUiThread([=] {
@@ -485,6 +499,66 @@ void MainWindow::neko_stop(bool crash, bool sem) {
             restartMsgbox->deleteLater();
         });
     });
+}
+
+bool MainWindow::tryLockStarting() {
+    if (!mu_starting.tryLock()) return false;
+    mu_starting_held = true;
+    return true;
+}
+
+void MainWindow::unlockStarting() {
+    if (mu_starting_held.exchange(false)) {
+        mu_starting.unlock();
+    }
+}
+
+bool MainWindow::tryLockStopping() {
+    if (!mu_stopping.tryLock()) return false;
+    mu_stopping_held = true;
+    return true;
+}
+
+void MainWindow::unlockStopping() {
+    if (mu_stopping_held.exchange(false)) {
+        mu_stopping.unlock();
+    }
+}
+
+void MainWindow::forceUnlockActions() {
+    unlockStarting();
+    unlockStopping();
+    // wake any start thread waiting for stop completion
+    sem_stopped.release();
+}
+
+void MainWindow::cancelLastAction() {
+    action_cancelled = true;
+    bool didSomething = false;
+    // Cancel URL / speed test
+    if (speedtesting) {
+        while (!speedtesting_threads.isEmpty()) {
+            auto t = speedtesting_threads.takeFirst();
+            if (t != nullptr) t->exit();
+        }
+        speedtesting = false;
+        didSomething = true;
+        MW_show_log(tr("Speed test cancelled"));
+    }
+    // Unblock stuck start/stop (e.g. after core crash left mutex held)
+    bool wasBusy = mu_starting_held || mu_stopping_held;
+    forceUnlockActions();
+    if (wasBusy) {
+        didSomething = true;
+        MW_show_log(tr("Pending start/stop cancelled"));
+        // Drop remembered auto-start-on-core-up so restart loop doesn't keep retrying
+        if (core_process != nullptr) {
+            core_process->start_profile_when_core_is_up = -1;
+        }
+    }
+    if (!didSomething) {
+        MW_show_log(tr("Nothing to cancel"));
+    }
 }
 
 void MainWindow::CheckUpdate() {

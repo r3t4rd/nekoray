@@ -74,6 +74,13 @@ namespace NekoGui_sys {
         ExternalProcess::managed = false;
         ExternalProcess::program = core_path;
         ExternalProcess::arguments = args;
+        // Allow legacy configs / custom routes that still reference block/dns outbounds
+        env << "ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS=true";
+        env << "ENABLE_DEPRECATED_INBOUND_OPTIONS=true";
+        env << "ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true";
+        env << "ENABLE_DEPRECATED_OUTBOUND_DNS_RULE_ITEM=true";
+        env << "ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true";
+        env << "ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true";
 
         connect(this, &QProcess::readyReadStandardOutput, this, [&]() {
             auto log = readAllStandardOutput();
