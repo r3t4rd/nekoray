@@ -36,6 +36,7 @@ class DialogVPNSettings;
 class DialogHotkey;
 class DetailsPanel;
 class StatsPanel;
+class SimpleModeWidget;
 
 #endif
 
@@ -83,6 +84,12 @@ public:
                              qint64 directUpRate, qint64 directDownRate,
                              qint64 proxyUpTotal, qint64 proxyDownTotal,
                              qint64 directUpTotal, qint64 directDownTotal);
+
+    void applyUiMode(bool simple);
+
+    void showSimpleMode();
+
+    void showAdvancedMode();
 
     void RegisterHotkey(bool unregister);
 
@@ -232,6 +239,8 @@ private:
     QString navReturnPage = "proxies";
     DetailsPanel *detailsPanel = nullptr;
     StatsPanel *statsPanel = nullptr;
+    SimpleModeWidget *simpleMode = nullptr;
+    QSize advancedSizeHint{1000, 700};
 
     //
 

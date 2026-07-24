@@ -19,6 +19,8 @@
 #include "ui/dialog_hotkey.h"
 #include "ui/widget/DetailsPanel.h"
 #include "ui/widget/StatsPanel.h"
+#include "ui/widget/SimpleModeWidget.h"
+#include "ui/widget/SimpleRouteEditor.h"
 
 #include "3rdparty/fix_old_qt.h"
 #include "3rdparty/qrcodegen.hpp"
@@ -127,6 +129,55 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->down_tab->addTab(detailsPanel, tr("Details"));
     ui->down_tab->addTab(statsPanel, tr("Stats"));
     NekoGui::dataStore->connection_statistics = true;
+
+    // Simple / Advanced UI mode
+    simpleMode = new SimpleModeWidget(ui->centralwidget);
+    simpleMode->hide();
+    connect(simpleMode, &SimpleModeWidget::requestAdvancedMode, this, &MainWindow::showAdvancedMode);
+    connect(simpleMode, &SimpleModeWidget::requestToggleBackground, this, [=] {
+        NekoGui::dataStore->ui_simple_bg = (NekoGui::dataStore->ui_simple_bg == 2) ? 1 : 2;
+        NekoGui::dataStore->Save();
+        simpleMode->reloadBackground();
+    });
+    connect(simpleMode, &SimpleModeWidget::requestEditRules, this, [=] {
+        SimpleRouteEditor dlg(this);
+        dlg.loadFromJson(NekoGui::dataStore->custom_route_global);
+        if (dlg.exec() != QDialog::Accepted) return;
+        NekoGui::dataStore->custom_route_global = dlg.toJson();
+        NekoGui::dataStore->Save();
+        MW_dialog_message("", "UpdateDataStore,RouteChanged");
+        MessageBoxInfo(software_name, tr("Rules saved"));
+    });
+    connect(simpleMode, &SimpleModeWidget::requestPowerToggle, this, [=](bool turnOn, int profileId) {
+        if (turnOn) {
+            if (profileId < 0) {
+                MessageBoxWarning(software_name, tr("Select a server first"));
+                simpleMode->refreshPowerState();
+                return;
+            }
+            NekoGui::dataStore->simple_last_profile_id = profileId;
+            NekoGui::dataStore->remember_id = profileId;
+            NekoGui::dataStore->remember_enable = true;
+            NekoGui::dataStore->Save();
+            if (!NekoGui::dataStore->spmode_vpn) {
+                neko_set_spmode_vpn(true, true);
+            }
+            if (NekoGui::dataStore->spmode_vpn) {
+                neko_start(profileId);
+            }
+        } else {
+            neko_stop();
+            if (NekoGui::dataStore->spmode_vpn) {
+                neko_set_spmode_vpn(false, true);
+            }
+        }
+        simpleMode->refreshPowerState();
+    });
+
+    // Program menu: switch to Simple
+    auto *actSimple = new QAction(tr("Simple Mode"), this);
+    ui->menu_program->insertAction(ui->menu_program->actions().value(0), actSimple);
+    connect(actSimple, &QAction::triggered, this, &MainWindow::showSimpleMode);
 
     // Setup log UI
     ui->splitter->restoreState(DecodeB64IfValid(NekoGui::dataStore->splitter_state));
@@ -460,6 +511,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     };
     connect(TM_auto_update_subsctiption, &QTimer::timeout, this, [&] { UI_update_all_groups(true); });
     TM_auto_update_subsctiption_Reset_Minute(NekoGui::dataStore->sub_auto_update);
+
+    applyUiMode(NekoGui::dataStore->ui_simple_mode);
 
     if (!NekoGui::dataStore->flag_tray) show();
 }
@@ -887,10 +940,70 @@ void MainWindow::on_menu_hotkey_settings_triggered() {
     navigateTo("hotkey");
 }
 
+void MainWindow::showSimpleMode() {
+    applyUiMode(true);
+}
+
+void MainWindow::showAdvancedMode() {
+    applyUiMode(false);
+}
+
+void MainWindow::applyUiMode(bool simple) {
+    NekoGui::dataStore->ui_simple_mode = simple;
+    NekoGui::dataStore->Save();
+
+    auto *shell = qobject_cast<QHBoxLayout *>(ui->centralwidget->layout());
+    if (!shell) return;
+
+    if (simple) {
+        if (!isMaximized() && (!simpleMode || !simpleMode->isVisible())) {
+            advancedSizeHint = size();
+            if (advancedSizeHint.width() >= 800) {
+                NekoGui::dataStore->mw_size = QStringLiteral("%1x%2").arg(advancedSizeHint.width()).arg(advancedSizeHint.height());
+            }
+        }
+        if (navTree) navTree->hide();
+        if (pageStack) pageStack->hide();
+        if (simpleMode->parent() != ui->centralwidget) {
+            simpleMode->setParent(ui->centralwidget);
+        }
+        if (shell->indexOf(simpleMode) < 0) {
+            shell->addWidget(simpleMode, 1);
+        }
+        simpleMode->show();
+        simpleMode->raise();
+        simpleMode->refreshServers();
+        simpleMode->reloadBackground();
+        simpleMode->refreshPowerState();
+
+        // Portrait window ~824:1280
+        setMinimumSize(360, 560);
+        setMaximumSize(520, 820);
+        resize(412, 640);
+    } else {
+        if (simpleMode) simpleMode->hide();
+        if (navTree) navTree->show();
+        if (pageStack) pageStack->show();
+
+        setMinimumSize(800, 600);
+        setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+        auto last_size = NekoGui::dataStore->mw_size.split("x");
+        if (last_size.length() == 2) {
+            auto w = last_size[0].toInt();
+            auto h = last_size[1].toInt();
+            if (w >= 800 && h >= 600) resize(w, h);
+            else resize(advancedSizeHint);
+        } else {
+            resize(advancedSizeHint);
+        }
+        navigateTo("proxies");
+    }
+}
+
 void MainWindow::on_commitDataRequest() {
     qDebug() << "Start of data save";
     //
-    if (!isMaximized()) {
+    if (!isMaximized() && !NekoGui::dataStore->ui_simple_mode) {
         auto olds = NekoGui::dataStore->mw_size;
         auto news = QStringLiteral("%1x%2").arg(size().width()).arg(size().height());
         if (olds != news) {
@@ -1112,6 +1225,10 @@ void MainWindow::refresh_status(const QString &traffic_update) {
         ui->label_running->setToolTip({});
     }
 
+    if (simpleMode && simpleMode->isVisible()) {
+        simpleMode->refreshPowerState();
+    }
+
     auto make_title = [=](bool isTray) {
         QStringList tt;
         if (!isTray && NekoGui::IsAdmin()) tt << "[Admin]";
@@ -1193,6 +1310,7 @@ void MainWindow::refresh_groups() {
     }
 
     NekoGui::dataStore->refreshing_group_list = false;
+    if (simpleMode && simpleMode->isVisible()) simpleMode->refreshServers();
 }
 
 void MainWindow::refresh_proxy_list(const int &id) {

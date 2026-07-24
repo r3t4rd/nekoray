@@ -250,6 +250,9 @@ namespace NekoGui {
         _add(new configItem("sub_use_proxy", &sub_use_proxy, itemType::boolean));
         _add(new configItem("remember_id", &remember_id, itemType::integer));
         _add(new configItem("remember_enable", &remember_enable, itemType::boolean));
+        _add(new configItem("ui_simple_mode", &ui_simple_mode, itemType::boolean));
+        _add(new configItem("ui_simple_bg", &ui_simple_bg, itemType::integer));
+        _add(new configItem("simple_last_profile", &simple_last_profile_id, itemType::integer));
         _add(new configItem("language", &language, itemType::integer));
         _add(new configItem("spmode2", &remember_spmode, itemType::stringList));
         _add(new configItem("skip_cert", &skip_cert, itemType::boolean));

@@ -132,6 +132,11 @@ namespace NekoGui {
         int remember_id = -1919;
         bool remember_enable = false;
 
+        // UI mode: false = Advanced, true = Simple
+        bool ui_simple_mode = true;
+        int ui_simple_bg = 1; // 1=anime ver1, 2=casual ver2
+        int simple_last_profile_id = -1;
+
         // Socks & HTTP Inbound
         QString inbound_address = "127.0.0.1";
         int inbound_socks_port = 2080; // or Mixed

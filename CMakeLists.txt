@@ -233,6 +233,10 @@ set(PROJECT_SOURCES
         ui/widget/DetailsPanel.h
         ui/widget/StatsPanel.cpp
         ui/widget/StatsPanel.h
+        ui/widget/SimpleModeWidget.cpp
+        ui/widget/SimpleModeWidget.h
+        ui/widget/SimpleRouteEditor.cpp
+        ui/widget/SimpleRouteEditor.h
 
         res/neko.qrc
         res/theme/feiyangqingyun/qss.qrc
