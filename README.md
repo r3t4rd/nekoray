@@ -1,4 +1,5 @@
 # NekoBox For PC
+<img src="https://raw.githubusercontent.com/r3t4rd/nekoray/refs/heads/main/ahertaw34a3.jpg" width="1234"/>
 
 Qt based cross-platform GUI proxy configuration manager (backend: sing-box)
 
