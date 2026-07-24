@@ -1,120 +1,197 @@
-# NekoBox For PC
-<img src="https://raw.githubusercontent.com/r3t4rd/nekoray/refs/heads/main/ahertaw34a3.jpg" width="1234"/>
+# NekoBox
 
-Qt based cross-platform GUI proxy configuration manager (backend: sing-box)
+<img src="https://raw.githubusercontent.com/r3t4rd/nekoray/refs/heads/main/ahertaw34a3.jpg" width="1234" alt="NekoBox screenshot"/>
 
-Support Windows / Linux out of the box now.
+Qt-based cross-platform GUI proxy configuration manager. Backend: **sing-box**.
 
-基于 Qt 的跨平台代理配置管理器 (后端 sing-box)
+This repository is a maintained fork of [MatsuriDayo/nekoray](https://github.com/MatsuriDayo/nekoray), published as **[r3t4rd/nekoray](https://github.com/r3t4rd/nekoray)**.
 
-目前支持 Windows / Linux 开箱即用
+**Current release version:** `5-2026-07-25.1`  
+**Supported platforms:** Windows x64 (portable ZIP), Linux
 
-## 下载 / Download
+---
 
-### GitHub Releases (Portable ZIP)
+## Download
 
-便携格式，无安装器。转到 Releases 下载预编译的二进制文件，解压后即可使用。
+Portable builds (no installer). Extract and run `nekobox.exe` (Windows) or the packaged binary (Linux).
 
-[![GitHub All Releases](https://img.shields.io/github/downloads/Matsuridayo/nekoray/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/Matsuridayo/nekoray/releases)
+**Releases:** https://github.com/r3t4rd/nekoray/releases
 
-[下载 / Download](https://github.com/Matsuridayo/nekoray/releases)
+Windows asset naming example:
 
-[安装包的说明，如果你不知道要下载哪一个](https://github.com/MatsuriDayo/nekoray/wiki/Installation-package-description)
+```text
+nekoray-5-2026-07-25.1-windows64.zip
+```
 
-### Package
+If Windows reports missing DLLs, install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 
-#### AUR
+Do not remove `nekobox_core.exe` or the `geo*` files next to the GUI.
 
-- [nekoray](https://aur.archlinux.org/packages/nekoray)
-- [nekoray-git](https://aur.archlinux.org/packages/nekoray-git)
+---
 
-#### archlinuxcn
+## What’s inside a release
 
-- [nekoray](https://github.com/archlinuxcn/repo/tree/master/archlinuxcn/nekoray)
-- [nekoray-git](https://github.com/archlinuxcn/repo/tree/master/archlinuxcn/nekoray-git)
+| File | Role |
+|------|------|
+| `nekobox.exe` | Qt GUI |
+| `nekobox_core.exe` | sing-box core + gRPC control plane |
+| `updater.exe` | In-app update helper |
+| `geoip.dat` / `geosite.dat` | v2ray-style routing lists |
+| `geoip.db` / `geosite.db` | sing-box routing databases |
+| Qt / OpenSSL DLLs | Runtime (Windows portable) |
 
-#### Scoop Extras
+---
 
-`scoop install nekoray`
+## Stack (what we use and where it comes from)
 
-## 更改记录 & 发布频道 / Changelog & Telegram Channel
+### Application
 
-https://t.me/Matsuridayo
+| Component | Source | Notes |
+|-----------|--------|--------|
+| GUI (NekoBox) | this repo (`r3t4rd/nekoray`) | C++17, CMake, Ninja, MSVC on Windows |
+| Upstream project | [MatsuriDayo/nekoray](https://github.com/MatsuriDayo/nekoray) | Original NekoRay / NekoBox |
+| Core wrapper | `go/cmd/nekobox_core` | Builds `nekobox_core` |
+| Updater | `go/cmd/updater` | Builds `updater` |
+| gRPC bridge | `go/grpc_server` | GUI ↔ core control API |
+| Version stamp | `nekoray_version.txt` | Embedded at build time (`NKR_VERSION` / Go ldflags) |
+| Auto-update API | GitHub Releases of **r3t4rd/nekoray** | `https://api.github.com/repos/r3t4rd/nekoray/releases` |
 
-## 项目主页 & 文档 / Homepage & Documents
+### Core (proxy engine)
 
-https://matsuridayo.github.io
+| Component | Source | Version / branch |
+|-----------|--------|------------------|
+| **sing-box** | [MatsuriDayo/sing-box](https://github.com/MatsuriDayo/sing-box) (`1.12.x`) | **`1.12.19-neko-1`** |
+| Upstream sing-box | [SagerNet/sing-box](https://github.com/SagerNet/sing-box) | Base project |
+| **libneko** | [MatsuriDayo/libneko](https://github.com/MatsuriDayo/libneko) | Shared Go helpers / version helpers |
+| Go toolchain | Go **1.23+** (local builds may use Go 1.22.12+) | See `go/cmd/nekobox_core/go.mod` |
 
-## 代理 / Proxy
+**Core build tags** (Windows deploy / `deploy_windows64.ps1`):
 
-- SOCKS (4/4a/5)
+```text
+with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls
+```
+
+> Note: `with_ech` is no longer used — ECH is covered by the Go stdlib in sing-box 1.12+.
+
+Local `replace` paths used when building the core:
+
+- `github.com/sagernet/sing-box` → sibling `sing-box` checkout  
+- `github.com/matsuridayo/libneko` → sibling `libneko` checkout  
+
+### GUI framework & C++ libraries
+
+| Library | Source | Version / usage |
+|---------|--------|-----------------|
+| **Qt** | [Qt](https://www.qt.io/) | **Qt 6** (Widgets, Network, Svg, LinguistTools); Windows release uses Qt 6.5.x SDK |
+| **protobuf** | [protocolbuffers/protobuf](https://github.com/protocolbuffers/protobuf) | **v21.4** (static, via `libs/deps`) |
+| **gRPC / myproto** | generated from project `.proto` | GUI ↔ `nekobox_core` |
+| **yaml-cpp** | [jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp) | **0.7.0** |
+| **zxing-cpp** | [nu-book/zxing-cpp](https://github.com/nu-book/zxing-cpp) | **v2.0.0** (QR import) |
+| **QHotkey** | [Skycoder42/QHotkey](https://github.com/Skycoder42/QHotkey) | Vendored under `3rdparty/QHotkey` |
+| **OpenSSL 3** | Bundled with Qt SDK / deploy | `libcrypto-3-x64.dll`, `libssl-3-x64.dll` on Windows |
+| CMake / Ninja / MSVC | Build tools | VS 2022 Build Tools on Windows |
+
+Dependency build helpers in-tree: `build_deps.bat`, `build_deps2.bat`, `build_protobuf.bat`, `libs/deps/`.
+
+### Geodata (downloaded at package time)
+
+| File | Upstream |
+|------|----------|
+| `geoip.dat` | [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) (latest release) |
+| `geosite.dat` | [v2fly/domain-list-community](https://github.com/v2fly/domain-list-community) (`dlc.dat`) |
+| `geoip.db` | [SagerNet/sing-geoip](https://github.com/SagerNet/sing-geoip) (latest release) |
+| `geosite.db` | [SagerNet/sing-geosite](https://github.com/SagerNet/sing-geosite) (latest release) |
+
+### Packaging (Windows)
+
+| Tool / script | Purpose |
+|---------------|---------|
+| `deploy_windows64.ps1` | Build core + GUI, `windeployqt`, fetch geodata, zip release |
+| `windeployqt` | Qt DLL deployment |
+| Output layout | `deployment/windows64/` and `deployment/nekoray-*-windows64.zip` |
+
+Release ZIP layout expected by the updater: top-level folder `nekoray/`.
+
+---
+
+## Supported proxies
+
+- SOCKS (4 / 4a / 5)
 - HTTP(S)
 - Shadowsocks
 - VMess
 - VLESS
 - Trojan
-- TUIC ( sing-box )
-- NaïveProxy ( Custom Core )
-- Hysteria2 ( Custom Core or sing-box )
-- Custom Outbound
-- Custom Config
-- Custom Core
+- TUIC (sing-box)
+- Hysteria2 (sing-box)
+- NaïveProxy (custom core)
+- Custom outbound / custom config / custom core
+- Proxy chains
 
-## 订阅 / Subscription
+## Subscriptions
 
-- Raw: some widely used formats (like Shadowsocks, Clash and v2rayN)
-- 原始格式: 一些广泛使用的格式 (如 Shadowsocks、Clash 和 v2rayN)
+Raw subscription formats commonly used by Shadowsocks, Clash, and v2rayN clients.
 
-## 运行参数
+---
 
-[运行参数](docs/RunFlags.md)
+## Run flags
 
-## Windows 运行
+See [docs/RunFlags.md](docs/RunFlags.md).
 
-若提示 DLL 缺失，无法运行，请下载 安装 [微软 C++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+## Build
 
-## Linux 运行
+Technical docs:
 
-[Linux 运行教程](docs/Run_Linux.md)
+- [docs/readme.md](docs/readme.md) — index
+- [docs/Build_Windows.md](docs/Build_Windows.md) — Windows GUI
+- [docs/Build_Linux.md](docs/Build_Linux.md) — Linux GUI
+- [docs/Build_Core.md](docs/Build_Core.md) — Go core (`sing-box` + `libneko`)
+- [docs/Run_Linux.md](docs/Run_Linux.md) — Linux runtime notes
 
-## 编译教程 / Compile Tutorial
+For a full Windows x64 portable package from this tree, use:
 
-请看 [技术文档 / Technical documentation](https://github.com/MatsuriDayo/nekoray/tree/main/docs)
+```powershell
+.\deploy_windows64.ps1
+```
 
-## 捐助 / Donate
+Typical sibling directory layout for the Go core:
 
-如果这个项目对您有帮助，可以通过捐赠的方式帮助我们维持这个项目。
+```text
+Working/
+  nekobox/          # this repo (GUI + go/cmd/*)
+  sing-box/         # MatsuriDayo/sing-box @ 1.12.19-neko-1
+  libneko/          # MatsuriDayo/libneko
+```
 
-捐赠满等额 50 USD 可以在「[捐赠榜](https://mtrdnt.pages.dev/donation_list)」显示头像，如果您未被添加到这里，欢迎联系我们补充。
-
-Donations of 50 USD or more can display your avatar on the [Donation List](https://mtrdnt.pages.dev/donation_list). If you are not added here, please contact us to add it.
-
-USDT TRC20
-
-`TRhnA7SXE5Sap5gSG3ijxRmdYFiD4KRhPs`
-
-XMR
-
-`49bwESYQjoRL3xmvTcjZKHEKaiGywjLYVQJMUv79bXonGiyDCs8AzE3KiGW2ytTybBCpWJUvov8SjZZEGg66a4e59GXa6k5`
+---
 
 ## Credits
 
-Core:
+**Core**
 
-- [v2fly/v2ray-core](https://github.com/v2fly/v2ray-core) ( < 3.10 )
-- [MatsuriDayo/Matsuri](https://github.com/MatsuriDayo/Matsuri) ( < 3.10 )
-- [MatsuriDayo/v2ray-core](https://github.com/MatsuriDayo/v2ray-core) ( < 3.10 )
-- [XTLS/Xray-core](https://github.com/XTLS/Xray-core) ( 3.10 <= Version <= 3.26 )
-- [MatsuriDayo/Xray-core](https://github.com/MatsuriDayo/Xray-core) ( 3.10 <= Version <= 3.26 )
 - [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
-- [Matsuridayo/sing-box-extra](https://github.com/MatsuriDayo/sing-box-extra)
+- [MatsuriDayo/sing-box](https://github.com/MatsuriDayo/sing-box) (`1.12.19-neko-1`)
+- [MatsuriDayo/libneko](https://github.com/MatsuriDayo/libneko)
 
-Gui:
+**GUI & tooling**
 
-- [Qv2ray](https://github.com/Qv2ray/Qv2ray)
+- [MatsuriDayo/nekoray](https://github.com/MatsuriDayo/nekoray) (upstream)
+- [Qv2ray](https://github.com/Qv2ray/Qv2ray) (historical GUI inspiration)
 - [Qt](https://www.qt.io/)
 - [protobuf](https://github.com/protocolbuffers/protobuf)
 - [yaml-cpp](https://github.com/jbeder/yaml-cpp)
 - [zxing-cpp](https://github.com/nu-book/zxing-cpp)
 - [QHotkey](https://github.com/Skycoder42/QHotkey)
-- [AppImageKit](https://github.com/AppImage/AppImageKit)
+
+**Geodata**
+
+- [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat)
+- [v2fly/domain-list-community](https://github.com/v2fly/domain-list-community)
+- [SagerNet/sing-geoip](https://github.com/SagerNet/sing-geoip)
+- [SagerNet/sing-geosite](https://github.com/SagerNet/sing-geosite)
+
+---
+
+## License
+
+See the repository license files and the licenses of third-party components listed above.
