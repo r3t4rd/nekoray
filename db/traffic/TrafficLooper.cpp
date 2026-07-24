@@ -108,10 +108,7 @@ namespace NekoGui_traffic {
             UpdateAll();
 
             // do conn list update
-            QJsonArray conn_list;
-            if (NekoGui::dataStore->connection_statistics) {
-                conn_list = get_connection_list();
-            }
+            QJsonArray conn_list = get_connection_list();
 
             loop_mutex.unlock();
 
@@ -120,14 +117,16 @@ namespace NekoGui_traffic {
                 auto m = GetMainWindow();
                 if (proxy != nullptr) {
                     m->refresh_status(QObject::tr("Proxy: %1\nDirect: %2").arg(proxy->DisplaySpeed(), bypass->DisplaySpeed()));
+                    m->updateTrafficCharts(proxy->uplink_rate, proxy->downlink_rate,
+                                           bypass->uplink_rate, bypass->downlink_rate,
+                                           proxy->uplink, proxy->downlink,
+                                           bypass->uplink, bypass->downlink);
                 }
                 for (const auto &item: items) {
                     if (item->id < 0) continue;
                     m->refresh_proxy_list(item->id);
                 }
-                if (NekoGui::dataStore->connection_statistics) {
-                    m->refresh_connection_list(conn_list);
-                }
+                m->refresh_connection_list(conn_list);
             });
         }
     }

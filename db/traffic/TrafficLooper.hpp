@@ -15,14 +15,13 @@ namespace NekoGui_traffic {
 
         QList<std::shared_ptr<TrafficData>> items;
         TrafficData *proxy = nullptr;
+        TrafficData *bypass = new TrafficData("bypass");
 
         void UpdateAll();
 
         void Loop();
 
     private:
-        TrafficData *bypass = new TrafficData("bypass");
-
         [[nodiscard]] static TrafficData *update_stats(TrafficData *item);
 
         [[nodiscard]] static QJsonArray get_connection_list();

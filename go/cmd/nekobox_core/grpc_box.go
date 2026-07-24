@@ -33,6 +33,7 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 			out.Error = err.Error()
 			instance = nil
 			instance_stats = nil
+			instance_conn = nil
 		}
 	}()
 
@@ -50,6 +51,9 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 	if instance != nil {
 		// Logger
 		instance.SetLogWritter(neko_log.LogWriter)
+		// Connection details tracker (process / FQDN / IP)
+		instance_conn = newNekoConnTracker(instance.Outbound())
+		instance.Router().AppendTracker(instance_conn)
 		// V2ray Service / connection tracker
 		if in.StatsOutbounds != nil {
 			instance_stats = boxapi.NewSbV2rayServer(option.V2RayStatsServiceOptions{
@@ -82,6 +86,7 @@ func (s *server) Stop(ctx context.Context, in *gen.EmptyReq) (out *gen.ErrorResp
 
 	instance = nil
 	instance_stats = nil
+	instance_conn = nil
 
 	return
 }
@@ -146,8 +151,11 @@ func (s *server) QueryStats(ctx context.Context, in *gen.QueryStatsReq) (out *ge
 }
 
 func (s *server) ListConnections(ctx context.Context, in *gen.EmptyReq) (*gen.ListConnectionsResp, error) {
-	out := &gen.ListConnectionsResp{
-		// TODO upstream api
+	out := &gen.ListConnectionsResp{}
+	if instance_conn != nil {
+		out.NekorayConnectionsJson = instance_conn.listJSON()
+	} else {
+		out.NekorayConnectionsJson = "[]"
 	}
 	return out, nil
 }

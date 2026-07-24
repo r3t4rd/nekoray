@@ -715,6 +715,7 @@ namespace NekoGui {
         auto routeObj = QJsonObject{
             {"rules", normalizedRules},
             {"auto_detect_interface", dataStore->spmode_vpn}, // TODO force enable?
+            {"find_process", !status->forTest},
             {
                 "geoip",
                 QJsonObject{

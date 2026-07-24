@@ -6,6 +6,8 @@
 #include "db/traffic/TrafficLooper.hpp"
 #include "rpc/gRPC.h"
 #include "ui/widget/MessageBoxTimer.h"
+#include "ui/widget/DetailsPanel.h"
+#include "ui/widget/StatsPanel.h"
 
 #include <QTimer>
 #include <QThread>
@@ -466,6 +468,8 @@ void MainWindow::neko_stop(bool crash, bool sem) {
         runOnUiThread([=] {
             refresh_status();
             refresh_proxy_list(id);
+            if (statsPanel) statsPanel->resetSession();
+            if (detailsPanel) detailsPanel->updateConnections({});
         });
 
         return true;

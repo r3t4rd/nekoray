@@ -229,6 +229,10 @@ set(PROJECT_SOURCES
         ui/widget/GroupItem.cpp
         ui/widget/GroupItem.h
         ui/widget/GroupItem.ui
+        ui/widget/DetailsPanel.cpp
+        ui/widget/DetailsPanel.h
+        ui/widget/StatsPanel.cpp
+        ui/widget/StatsPanel.h
 
         res/neko.qrc
         res/theme/feiyangqingyun/qss.qrc

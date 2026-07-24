@@ -34,6 +34,8 @@ class DialogManageGroups;
 class DialogManageRoutes;
 class DialogVPNSettings;
 class DialogHotkey;
+class DetailsPanel;
+class StatsPanel;
 
 #endif
 
@@ -76,6 +78,11 @@ public:
     void start_select_mode(QObject *context, const std::function<void(int)> &callback);
 
     void refresh_connection_list(const QJsonArray &arr);
+
+    void updateTrafficCharts(qint64 proxyUpRate, qint64 proxyDownRate,
+                             qint64 directUpRate, qint64 directDownRate,
+                             qint64 proxyUpTotal, qint64 proxyDownTotal,
+                             qint64 directUpTotal, qint64 directDownTotal);
 
     void RegisterHotkey(bool unregister);
 
@@ -223,6 +230,8 @@ private:
     QWidget *pageEditProfileHost = nullptr;
     QWidget *pageEditGroupHost = nullptr;
     QString navReturnPage = "proxies";
+    DetailsPanel *detailsPanel = nullptr;
+    StatsPanel *statsPanel = nullptr;
 
     //
 

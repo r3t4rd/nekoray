@@ -16,6 +16,7 @@ import (
 var instance *box.Box
 var instance_cancel context.CancelFunc
 var instance_stats *boxapi.SbV2rayServer
+var instance_conn *nekoConnTracker
 
 func setupCore() {
 	boxmain.SetDisableColor(true)
