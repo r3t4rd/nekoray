@@ -160,17 +160,37 @@
        </widget>
       </item>
       <item>
-       <widget class="QToolButton" name="toolButton_url_test">
-        <property name="text">
-         <string>URL Test</string>
+       <layout class="QVBoxLayout" name="verticalLayout_url_mini">
+        <property name="spacing">
+         <number>2</number>
         </property>
-        <property name="popupMode">
-         <enum>QToolButton::InstantPopup</enum>
-        </property>
-        <property name="toolButtonStyle">
-         <enum>Qt::ToolButtonTextUnderIcon</enum>
-        </property>
-       </widget>
+        <item>
+         <widget class="QToolButton" name="toolButton_url_test">
+          <property name="text">
+           <string>URL Test</string>
+          </property>
+          <property name="popupMode">
+           <enum>QToolButton::InstantPopup</enum>
+          </property>
+          <property name="toolButtonStyle">
+           <enum>Qt::ToolButtonTextUnderIcon</enum>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QToolButton" name="toolButton_mini_mode">
+          <property name="text">
+           <string>Mini</string>
+          </property>
+          <property name="toolTip">
+           <string>Simple Mode</string>
+          </property>
+          <property name="toolButtonStyle">
+           <enum>Qt::ToolButtonTextUnderIcon</enum>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
       <item>
        <widget class="QToolButton" name="toolButton_cancel_action">

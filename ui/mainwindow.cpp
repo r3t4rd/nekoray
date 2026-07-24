@@ -115,6 +115,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->toolButton_update, &QToolButton::clicked, this, [=] { runOnNewThread([=] { CheckUpdate(); }); });
     connect(ui->toolButton_url_test, &QToolButton::clicked, this, [=] { speedtest_current_group(1, true); });
     connect(ui->toolButton_cancel_action, &QToolButton::clicked, this, [=] { cancelLastAction(); });
+    connect(ui->toolButton_mini_mode, &QToolButton::clicked, this, &MainWindow::showSimpleMode);
 
     setupNavigation();
 
@@ -140,10 +141,26 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         simpleMode->reloadBackground();
     });
     connect(simpleMode, &SimpleModeWidget::requestEditRules, this, [=] {
+        // Merge scheme Custom Route + Custom Route (global) — users often edit either one
+        auto mergeRouteJson = [](const QString &a, const QString &b) -> QString {
+            QJsonArray rules;
+            auto take = [&](const QString &raw) {
+                auto obj = QString2QJsonObject(raw.trimmed().isEmpty() ? QStringLiteral("{\"rules\":[]}") : raw);
+                for (const auto &v: obj.value("rules").toArray()) rules += v;
+            };
+            take(a);
+            take(b);
+            return QJsonObject2QString(QJsonObject{{"rules", rules}}, false);
+        };
         SimpleRouteEditor dlg(this);
-        dlg.loadFromJson(NekoGui::dataStore->custom_route_global);
+        dlg.loadFromJson(mergeRouteJson(NekoGui::dataStore->routing->custom,
+                                        NekoGui::dataStore->custom_route_global));
         if (dlg.exec() != QDialog::Accepted) return;
-        NekoGui::dataStore->custom_route_global = dlg.toJson();
+        const QString out = dlg.toJson();
+        // Keep a single source to avoid ConfigBuilder applying the same rules twice
+        NekoGui::dataStore->routing->custom = out;
+        NekoGui::dataStore->custom_route_global = QStringLiteral("{\"rules\": []}");
+        NekoGui::dataStore->routing->Save();
         NekoGui::dataStore->Save();
         MW_dialog_message("", "UpdateDataStore,RouteChanged");
         MessageBoxInfo(software_name, tr("Rules saved"));

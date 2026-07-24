@@ -2,118 +2,156 @@
 
 #include "db/Database.hpp"
 #include "main/NekoGui.hpp"
-#include "ui/mainwindow_interface.h"
 
 #include <QPainter>
-#include <QPainterPath>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QComboBox>
 #include <QPushButton>
 #include <QLabel>
-#include <QGraphicsDropShadowEffect>
+#include <QScrollArea>
+#include <QFrame>
 #include <QResizeEvent>
+#include <QEvent>
+#include <QMouseEvent>
+#include <QPalette>
+#include <QSizePolicy>
+
+static void makeTransparent(QWidget *w) {
+    if (!w) return;
+    w->setAttribute(Qt::WA_TranslucentBackground, true);
+    w->setAutoFillBackground(false);
+    QPalette pal = w->palette();
+    pal.setColor(QPalette::Window, Qt::transparent);
+    pal.setColor(QPalette::Base, Qt::transparent);
+    w->setPalette(pal);
+}
 
 SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
     setObjectName("SimpleModeWidget");
+    setAttribute(Qt::WA_OpaquePaintEvent, true);
 
     advancedBtn = new QPushButton(tr("Advanced"), this);
     bgBtn = new QPushButton(tr("Theme"), this);
-    advancedBtn->setCursor(Qt::PointingHandCursor);
-    bgBtn->setCursor(Qt::PointingHandCursor);
+    rulesBtn = new QPushButton(tr("Rules"), this);
+    for (auto *b: {advancedBtn, bgBtn, rulesBtn}) {
+        b->setCursor(Qt::PointingHandCursor);
+        b->setFixedHeight(28);
+        applyChromeButtonStyle(b);
+    }
 
-    glass = new QWidget(this);
-    glass->setObjectName("simpleGlass");
-
-    statusLabel = new QLabel(tr("Disconnected"), glass);
-    statusLabel->setAlignment(Qt::AlignCenter);
-
-    serverCombo = new QComboBox(glass);
-    serverCombo->setMinimumHeight(36);
-
-    powerBtn = new QPushButton(tr("Connect"), glass);
-    powerBtn->setCheckable(true);
-    powerBtn->setMinimumHeight(52);
-    powerBtn->setCursor(Qt::PointingHandCursor);
-    powerBtn->setObjectName("powerBtn");
-
-    rulesBtn = new QPushButton(tr("Rules"), glass);
-    rulesBtn->setMinimumHeight(36);
-    rulesBtn->setCursor(Qt::PointingHandCursor);
-
-    auto *gl = new QVBoxLayout(glass);
-    gl->setContentsMargins(18, 18, 18, 18);
-    gl->setSpacing(12);
-    gl->addWidget(statusLabel);
-    gl->addWidget(serverCombo);
-    gl->addWidget(powerBtn);
-    gl->addWidget(rulesBtn);
-
-    auto *shadow = new QGraphicsDropShadowEffect(glass);
-    shadow->setBlurRadius(28);
-    shadow->setOffset(0, 8);
-    shadow->setColor(QColor(0, 0, 0, 120));
-    glass->setGraphicsEffect(shadow);
-
-    setStyleSheet(
-        "QPushButton#powerBtn {"
-        "  background: rgba(40,120,255,210);"
-        "  color: white;"
-        "  border: none;"
-        "  border-radius: 14px;"
-        "  font-size: 18px;"
-        "  font-weight: 700;"
-        "}"
-        "QPushButton#powerBtn:checked {"
-        "  background: rgba(220,60,70,220);"
-        "}"
-        "QPushButton#powerBtn:hover { background: rgba(60,140,255,230); }"
-        "QPushButton#powerBtn:checked:hover { background: rgba(235,80,90,230); }"
-        "#simpleGlass {"
-        "  background: rgba(18,20,28,155);"
+    hero = new QFrame(this);
+    hero->setObjectName("heroBlock");
+    hero->setCursor(Qt::PointingHandCursor);
+    hero->installEventFilter(this);
+    hero->setStyleSheet(
+        "#heroBlock {"
+        "  background: rgba(10,12,18,150);"
         "  border-radius: 18px;"
-        "  border: 1px solid rgba(255,255,255,40);"
-        "}"
-        "#simpleGlass QLabel { color: #f2f2f5; font-size: 13px; }"
-        "#simpleGlass QComboBox {"
-        "  background: rgba(255,255,255,230);"
-        "  border-radius: 10px;"
-        "  padding: 6px 10px;"
-        "  border: none;"
-        "}"
-        "#simpleGlass QPushButton {"
-        "  background: rgba(255,255,255,210);"
-        "  border: none;"
-        "  border-radius: 10px;"
-        "  padding: 8px 12px;"
-        "  font-weight: 600;"
-        "}"
-        "QPushButton {"
-        "  background: rgba(20,22,30,160);"
-        "  color: white;"
-        "  border: 1px solid rgba(255,255,255,50);"
-        "  border-radius: 10px;"
-        "  padding: 6px 12px;"
+        "  border: 1px solid rgba(255,255,255,35);"
         "}");
+    auto *heroLay = new QVBoxLayout(hero);
+    heroLay->setContentsMargins(16, 12, 16, 12);
+    heroLay->setSpacing(0);
+    heroTitle = new QLabel(tr("Подключись"), hero);
+    heroTitle->setAlignment(Qt::AlignCenter);
+    heroTitle->setStyleSheet(
+        "color: #ffffff;"
+        "font-size: 22px;"
+        "font-weight: 700;"
+        "letter-spacing: 1px;"
+        "background: transparent;");
+    heroLay->addStretch(1);
+    heroLay->addWidget(heroTitle);
+    heroLay->addStretch(1);
+
+    // Status lives under the hero block (not inside it)
+    heroSub = new QLabel(tr("Not connected"), this);
+    heroSub->setAlignment(Qt::AlignCenter);
+    heroSub->setStyleSheet("color: #e8a4a4; font-size: 13px; font-weight: 600; background: transparent;");
+
+    serverScroll = new QScrollArea(this);
+    serverScroll->setObjectName("serverScroll");
+    serverScroll->setWidgetResizable(true);
+    serverScroll->setFrameShape(QFrame::NoFrame);
+    serverScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    serverScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    makeTransparent(serverScroll);
+    makeTransparent(serverScroll->viewport());
+    serverScroll->setStyleSheet(
+        "QScrollArea#serverScroll { background: transparent; border: none; }"
+        "QScrollArea#serverScroll > QWidget { background: transparent; }"
+        "QScrollBar:vertical {"
+        "  width: 5px; background: transparent; margin: 2px;"
+        "}"
+        "QScrollBar::handle:vertical {"
+        "  background: rgba(255,255,255,70); border-radius: 2px; min-height: 24px;"
+        "}"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }");
+
+    serverListHost = new QWidget;
+    serverListHost->setObjectName("serverListHost");
+    makeTransparent(serverListHost);
+    serverListHost->setStyleSheet("#serverListHost { background: transparent; }");
+    serverListHost->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    serverListLayout = new QVBoxLayout(serverListHost);
+    serverListLayout->setContentsMargins(12, 4, 12, 8);
+    serverListLayout->setSpacing(5);
+    serverListLayout->setAlignment(Qt::AlignTop);
+    serverScroll->setWidget(serverListHost);
 
     connect(advancedBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestAdvancedMode);
     connect(bgBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestToggleBackground);
     connect(rulesBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestEditRules);
-    connect(powerBtn, &QPushButton::clicked, this, [=](bool checked) {
-        int id = serverCombo->currentData().toInt();
-        emit requestPowerToggle(checked, id);
-    });
-    connect(serverCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
-        auto id = serverCombo->currentData().toInt();
-        if (id >= 0) {
-            NekoGui::dataStore->simple_last_profile_id = id;
-            NekoGui::dataStore->Save();
-        }
-    });
 
     reloadBackground();
     refreshServers();
     refreshPowerState();
+}
+
+void SimpleModeWidget::applyChromeButtonStyle(QPushButton *b) {
+    b->setStyleSheet(
+        "QPushButton {"
+        "  background: rgba(12,14,20,170);"
+        "  color: #f0f0f3;"
+        "  border: 1px solid rgba(255,255,255,40);"
+        "  border-radius: 9px;"
+        "  padding: 3px 10px;"
+        "  font-weight: 600;"
+        "}"
+        "QPushButton:hover { background: rgba(22,26,36,200); }");
+}
+
+void SimpleModeWidget::applyServerCardStyle(QPushButton *card, bool checked) {
+    Q_UNUSED(checked)
+    card->setStyleSheet(
+        "QPushButton {"
+        "  background: rgba(10,12,18,155);"
+        "  color: #f0f0f3;"
+        "  border: 1px solid rgba(255,255,255,38);"
+        "  border-radius: 10px;"
+        "  padding: 4px 12px;"
+        "  text-align: left;"
+        "  font-size: 13px;"
+        "  font-weight: 600;"
+        "}"
+        "QPushButton:checked {"
+        "  background: rgba(18,28,48,200);"
+        "  border: 1px solid rgba(140,170,220,140);"
+        "}"
+        "QPushButton:hover {"
+        "  background: rgba(18,22,32,190);"
+        "}");
+}
+
+QRect SimpleModeWidget::mapDesignRect(int x, int y, int w, int h) const {
+    if (width() <= 0 || height() <= 0) return {};
+    double scale = qMax((double) width() / kDesignW, (double) height() / kDesignH);
+    double drawW = kDesignW * scale;
+    double drawH = kDesignH * scale;
+    double ox = (width() - drawW) / 2.0;
+    double oy = (height() - drawH) / 2.0;
+    return QRect(qRound(ox + x * scale), qRound(oy + y * scale), qRound(w * scale), qRound(h * scale));
 }
 
 void SimpleModeWidget::reloadBackground() {
@@ -121,78 +159,101 @@ void SimpleModeWidget::reloadBackground() {
     if (ver != 2) ver = 1;
     QString path = ver == 2 ? ":/neko/ver2.jpg" : ":/neko/ver1.jpg";
     bg = QPixmap(path);
-    // fallback to file next to cwd / repo root
-    if (bg.isNull()) {
-        bg = QPixmap(ver == 2 ? "ver2.jpg" : "ver1.jpg");
-    }
+    if (bg.isNull()) bg = QPixmap(ver == 2 ? "ver2.jpg" : "ver1.jpg");
     update();
 }
 
+int SimpleModeWidget::selectedProfileId() const {
+    return selectedId;
+}
+
 void SimpleModeWidget::refreshServers() {
-    serverCombo->blockSignals(true);
-    serverCombo->clear();
+    // Fully clear layout — no leftover stretch / ghost widgets
+    while (serverListLayout->count() > 0) {
+        auto *item = serverListLayout->takeAt(0);
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    serverCards.clear();
+
+    if (selectedId < 0) {
+        selectedId = NekoGui::dataStore->simple_last_profile_id;
+        if (selectedId < 0) selectedId = NekoGui::dataStore->remember_id;
+        if (selectedId < 0) selectedId = NekoGui::dataStore->started_id;
+    }
+
     auto group = NekoGui::profileManager->CurrentGroup();
-    int selectId = NekoGui::dataStore->simple_last_profile_id;
-    if (selectId < 0) selectId = NekoGui::dataStore->remember_id;
-    if (selectId < 0) selectId = NekoGui::dataStore->started_id;
-    int selectIndex = 0;
-    if (group) {
-        int i = 0;
-        for (const auto &pf: group->ProfilesWithOrder()) {
-            serverCombo->addItem(pf->bean->DisplayTypeAndName(), pf->id);
-            if (pf->id == selectId) selectIndex = i;
-            ++i;
-        }
+    if (!group) {
+        serverListHost->adjustSize();
+        return;
     }
-    if (serverCombo->count() == 0) {
-        serverCombo->addItem(tr("No servers"), -1);
+
+    for (const auto &pf: group->ProfilesWithOrder()) {
+        auto *card = new QPushButton(pf->bean->DisplayName(), serverListHost);
+        card->setProperty("profileId", pf->id);
+        card->setCheckable(true);
+        card->setChecked(pf->id == selectedId);
+        card->setFixedHeight(34);
+        card->setCursor(Qt::PointingHandCursor);
+        card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        applyServerCardStyle(card, card->isChecked());
+
+        connect(card, &QPushButton::clicked, this, [=] {
+            selectedId = pf->id;
+            NekoGui::dataStore->simple_last_profile_id = pf->id;
+            NekoGui::dataStore->Save();
+            for (auto *c: serverCards) {
+                bool on = c->property("profileId").toInt() == selectedId;
+                c->setChecked(on);
+            }
+            emit requestPowerToggle(true, selectedId);
+        });
+
+        serverListLayout->addWidget(card);
+        serverCards << card;
     }
-    serverCombo->setCurrentIndex(selectIndex);
-    serverCombo->blockSignals(false);
+
+    serverListHost->adjustSize();
+}
+
+void SimpleModeWidget::updateHeroText() {
+    bool on = NekoGui::dataStore->started_id >= 0;
+    if (on) {
+        auto ent = NekoGui::profileManager->GetProfile(NekoGui::dataStore->started_id);
+        QString name = ent ? ent->bean->DisplayName() : QString::number(NekoGui::dataStore->started_id);
+        heroTitle->setText(name);
+        heroSub->setText(tr("Connected"));
+        heroSub->setStyleSheet("color: #8fceb0; font-size: 13px; font-weight: 600; background: transparent;");
+    } else {
+        heroTitle->setText(tr("Подключись"));
+        heroSub->setText(tr("Not connected"));
+        heroSub->setStyleSheet("color: #e8a4a4; font-size: 13px; font-weight: 600; background: transparent;");
+    }
 }
 
 void SimpleModeWidget::refreshPowerState() {
     bool on = NekoGui::dataStore->started_id >= 0;
-    powerBtn->blockSignals(true);
-    powerBtn->setChecked(on);
-    powerBtn->setText(on ? tr("Disconnect") : tr("Connect"));
-    powerBtn->blockSignals(false);
     if (on) {
-        auto ent = NekoGui::profileManager->GetProfile(NekoGui::dataStore->started_id);
-        QString name = ent ? ent->bean->DisplayName() : QString::number(NekoGui::dataStore->started_id);
-        statusLabel->setText(tr("Connected · %1").arg(name));
-        // sync combo
-        for (int i = 0; i < serverCombo->count(); ++i) {
-            if (serverCombo->itemData(i).toInt() == NekoGui::dataStore->started_id) {
-                serverCombo->setCurrentIndex(i);
-                break;
-            }
+        selectedId = NekoGui::dataStore->started_id;
+        for (auto *c: serverCards) {
+            c->setChecked(c->property("profileId").toInt() == selectedId);
         }
-    } else {
-        statusLabel->setText(NekoGui::dataStore->spmode_vpn ? tr("TUN on · Idle") : tr("Disconnected"));
     }
+    updateHeroText();
 }
 
 void SimpleModeWidget::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::SmoothPixmapTransform, true);
     if (!bg.isNull()) {
-        // cover crop
-        QSize target = size();
-        QSize src = bg.size();
-        double scale = qMax((double) target.width() / src.width(), (double) target.height() / src.height());
-        int w = (int) (src.width() * scale);
-        int h = (int) (src.height() * scale);
-        QRect dest((target.width() - w) / 2, (target.height() - h) / 2, w, h);
+        double scale = qMax((double) width() / kDesignW, (double) height() / kDesignH);
+        int w = (int) (kDesignW * scale);
+        int h = (int) (kDesignH * scale);
+        QRect dest((width() - w) / 2, (height() - h) / 2, w, h);
         p.drawPixmap(dest, bg);
     } else {
         p.fillRect(rect(), QColor(28, 30, 38));
     }
-    // soft vignette at bottom for readability
-    QLinearGradient g(0, height() * 0.45, 0, height());
-    g.setColorAt(0, QColor(0, 0, 0, 0));
-    g.setColorAt(1, QColor(0, 0, 0, 120));
-    p.fillRect(rect(), g);
 }
 
 void SimpleModeWidget::resizeEvent(QResizeEvent *e) {
@@ -200,23 +261,58 @@ void SimpleModeWidget::resizeEvent(QResizeEvent *e) {
     rebuildChromeLayout();
 }
 
+bool SimpleModeWidget::eventFilter(QObject *obj, QEvent *event) {
+    if (obj == hero && event->type() == QEvent::MouseButtonRelease) {
+        bool on = NekoGui::dataStore->started_id >= 0;
+        int id = selectedId;
+        if (id < 0 && !serverCards.isEmpty()) {
+            id = serverCards.first()->property("profileId").toInt();
+        }
+        emit requestPowerToggle(!on, id);
+        return true;
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
 void SimpleModeWidget::rebuildChromeLayout() {
-    const int m = 14;
-    advancedBtn->setParent(this);
-    bgBtn->setParent(this);
+    const int m = 12;
     advancedBtn->adjustSize();
+    rulesBtn->adjustSize();
     bgBtn->adjustSize();
-    advancedBtn->setFixedHeight(32);
-    bgBtn->setFixedHeight(32);
     advancedBtn->move(m, m);
     bgBtn->move(width() - m - bgBtn->width(), m);
+    rulesBtn->move(bgBtn->x() - 8 - rulesBtn->width(), m);
     advancedBtn->raise();
+    rulesBtn->raise();
     bgBtn->raise();
 
-    int glassW = qMin(width() - 28, 340);
-    int glassH = 220;
-    int gx = (width() - glassW) / 2;
-    int gy = height() - glassH - 28;
-    glass->setGeometry(gx, gy, glassW, glassH);
-    glass->raise();
+    QRect heroR = mapDesignRect(kHeroX, kHeroY, kHeroW, kHeroH);
+    heroR = heroR.intersected(rect().adjusted(8, 40, -8, -8));
+    if (heroR.height() < 56) heroR.setHeight(56);
+    hero->setGeometry(heroR);
+    hero->raise();
+
+    heroSub->adjustSize();
+    const int subW = qMin(width() - 24, qMax(heroR.width(), heroSub->sizeHint().width() + 20));
+    const int subX = (width() - subW) / 2;
+    const int subY = heroR.bottom() + 8;
+    heroSub->setGeometry(subX, subY, subW, heroSub->sizeHint().height());
+    heroSub->raise();
+
+    // Full-width list, max 30% of window, pinned to bottom — no phantom stretch
+    const int listMaxH = qMax(72, (int) (height() * 0.30));
+    const int gap = 10;
+    int listBottom = height() - 10;
+    int listTop = listBottom - listMaxH;
+    const int minTop = heroSub->geometry().bottom() + gap;
+    if (listTop < minTop) listTop = minTop;
+    int listH = listBottom - listTop;
+    if (listH > 40) {
+        serverScroll->setGeometry(0, listTop, width(), listH);
+        serverScroll->show();
+        serverScroll->raise();
+        makeTransparent(serverScroll->viewport());
+    } else {
+        serverScroll->hide();
+    }
 }
