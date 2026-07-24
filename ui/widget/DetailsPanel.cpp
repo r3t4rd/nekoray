@@ -68,6 +68,7 @@ void addConn(AggNode &root, const QStringList &path, const QJsonObject &obj) {
         if (last > cur->lastSeen) cur->lastSeen = last;
         cur->total += 1;
         if (obj["Active"].toBool()) cur->active += 1;
+        // Outbound on every level (FQDN included), not only the IP leaf
         mergeTag(cur, tag);
     }
 }
