@@ -6,7 +6,7 @@ Qt-based cross-platform GUI proxy configuration manager. Backend: **sing-box**.
 
 This repository is a maintained fork of [MatsuriDayo/nekoray](https://github.com/MatsuriDayo/nekoray), published as **[r3t4rd/nekoray](https://github.com/r3t4rd/nekoray)**.
 
-**Current release version:** `5-2026-07-31.1`  
+**Current release version:** `5-2026-07-31.3`  
 **Supported platforms:** Windows x64 (portable ZIP), Linux
 
 ---
@@ -20,7 +20,7 @@ Portable builds (no installer). Extract and run `nekobox.exe` (Windows) or the p
 Windows asset naming example:
 
 ```text
-nekoray-5-2026-07-31.1-windows64.zip
+nekoray-5-2026-07-31.3-windows64.zip
 ```
 
 If Windows reports missing DLLs, install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
