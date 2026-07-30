@@ -7,6 +7,7 @@
 #include "main/NekoGui.hpp"
 
 
+
 #include <QPainter>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -21,6 +22,7 @@
 #include <QPalette>
 #include <QSizePolicy>
 #include <QFontMetrics>
+#include <QColor>
 
 
 
@@ -43,9 +45,11 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
 
 
     advancedBtn = new QPushButton(tr("Advanced"), this);
+    updateBtn = new QPushButton(tr("Update"), this);
     bgBtn = new QPushButton(tr("Theme"), this);
     rulesBtn = new QPushButton(tr("Rules"), this);
-    for (auto *b: {advancedBtn, bgBtn, rulesBtn}) {
+    testBtn = new QPushButton(tr("Test"), this);
+    for (auto *b: {advancedBtn, updateBtn, bgBtn, rulesBtn, testBtn}) {
         b->setCursor(Qt::PointingHandCursor);
         b->setFixedHeight(28);
         applyChromeButtonStyle(b);
@@ -180,8 +184,10 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
 
 
     connect(advancedBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestAdvancedMode);
+    connect(updateBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestCheckUpdate);
     connect(bgBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestToggleBackground);
     connect(rulesBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestEditRules);
+    connect(testBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestUrlTest);
 
 
 
@@ -209,7 +215,8 @@ void SimpleModeWidget::applyChromeButtonStyle(QPushButton *b) {
         "  padding: 3px 10px;"
         "  font-weight: 600;"
         "}"
-        "QPushButton:hover { background: rgba(22,26,36,200); }");
+        "QPushButton:hover { background: rgba(22,26,36,200); }"
+        "QPushButton:disabled { color: #888890; }");
 }
 
 
@@ -234,6 +241,26 @@ void SimpleModeWidget::applyServerCardStyle(QPushButton *card, bool checked) {
         "QPushButton:hover {"
         "  background: rgba(18,22,32,190);"
         "}");
+}
+
+
+
+void SimpleModeWidget::applyLatencyLabel(QLabel *label, int latency) {
+    if (!label) return;
+    QString text;
+    QColor color(200, 200, 210);
+    if (latency < 0) {
+        text = tr("Unavailable");
+        color = QColor(220, 90, 90);
+    } else if (latency > 0) {
+        text = QStringLiteral("%1 ms").arg(latency);
+        const int greenMs = NekoGui::dataStore->test_latency_url.startsWith("https://") ? 200 : 100;
+        color = latency < greenMs ? QColor(110, 190, 140) : QColor(210, 180, 90);
+    }
+    label->setText(text);
+    label->setStyleSheet(QStringLiteral(
+                             "color: %1; font-size: 11px; font-weight: 600; background: transparent;")
+                             .arg(color.name()));
 }
 
 
@@ -263,6 +290,18 @@ void SimpleModeWidget::reloadBackground() {
 
 int SimpleModeWidget::selectedProfileId() const {
     return selectedId;
+}
+
+
+
+void SimpleModeWidget::setUrlTestBusy(bool busy) {
+    urlTestBusy = busy;
+    if (testBtn) {
+        testBtn->setEnabled(!busy);
+        testBtn->setText(busy ? tr("Testing…") : tr("Test"));
+        testBtn->adjustSize();
+        rebuildChromeLayout();
+    }
 }
 
 
@@ -312,6 +351,19 @@ void SimpleModeWidget::pushTrafficSample(qint64 proxyUpRate, qint64 proxyDownRat
 
 
 
+void SimpleModeWidget::updateServerLatency(int profileId) {
+    for (int i = 0; i < serverCards.size(); ++i) {
+        auto *card = serverCards[i];
+        const int id = card->property("profileId").toInt();
+        if (profileId >= 0 && id != profileId) continue;
+        auto pf = NekoGui::profileManager->GetProfile(id);
+        if (!pf || i >= serverLatencyLabels.size()) continue;
+        applyLatencyLabel(serverLatencyLabels[i], pf->latency);
+    }
+}
+
+
+
 void SimpleModeWidget::refreshServers() {
     // Fully clear layout — no leftover stretch / ghost widgets
     while (serverListLayout->count() > 0) {
@@ -320,6 +372,7 @@ void SimpleModeWidget::refreshServers() {
         delete item;
     }
     serverCards.clear();
+    serverLatencyLabels.clear();
 
 
 
@@ -340,7 +393,7 @@ void SimpleModeWidget::refreshServers() {
 
 
     for (const auto &pf: group->ProfilesWithOrder()) {
-        auto *card = new QPushButton(pf->bean->DisplayName(), serverListHost);
+        auto *card = new QPushButton(serverListHost);
         card->setProperty("profileId", pf->id);
         card->setCheckable(true);
         card->setChecked(pf->id == selectedId);
@@ -348,6 +401,32 @@ void SimpleModeWidget::refreshServers() {
         card->setCursor(Qt::PointingHandCursor);
         card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         applyServerCardStyle(card, card->isChecked());
+
+
+
+        auto *row = new QHBoxLayout(card);
+        row->setContentsMargins(4, 0, 4, 0);
+        row->setSpacing(8);
+
+
+
+        auto *name = new QLabel(pf->bean->DisplayName(), card);
+        name->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        name->setStyleSheet("color: #f0f0f3; font-size: 13px; font-weight: 600; background: transparent;");
+        name->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+
+
+        auto *lat = new QLabel(card);
+        lat->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        lat->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        lat->setMinimumWidth(72);
+        applyLatencyLabel(lat, pf->latency);
+
+
+
+        row->addWidget(name, 1);
+        row->addWidget(lat, 0);
 
 
 
@@ -366,6 +445,7 @@ void SimpleModeWidget::refreshServers() {
 
         serverListLayout->addWidget(card);
         serverCards << card;
+        serverLatencyLabels << lat;
     }
 
 
@@ -477,12 +557,19 @@ bool SimpleModeWidget::eventFilter(QObject *obj, QEvent *event) {
 void SimpleModeWidget::rebuildChromeLayout() {
     const int m = 12;
     advancedBtn->adjustSize();
+    updateBtn->adjustSize();
     rulesBtn->adjustSize();
     bgBtn->adjustSize();
+    testBtn->adjustSize();
+
+
+
     advancedBtn->move(m, m);
+    updateBtn->move(advancedBtn->x() + advancedBtn->width() + 8, m);
     bgBtn->move(width() - m - bgBtn->width(), m);
     rulesBtn->move(bgBtn->x() - 8 - rulesBtn->width(), m);
     advancedBtn->raise();
+    updateBtn->raise();
     rulesBtn->raise();
     bgBtn->raise();
 
@@ -524,9 +611,10 @@ void SimpleModeWidget::rebuildChromeLayout() {
     // Full-width list, max 30% of window, pinned to bottom — no phantom stretch
     const int listMaxH = qMax(72, (int) (height() * 0.30));
     const int gap = 10;
+    const int testH = testBtn->sizeHint().height();
     int listBottom = height() - 10;
     int listTop = listBottom - listMaxH;
-    const int minTop = heroSub->geometry().bottom() + gap;
+    const int minTop = heroSub->geometry().bottom() + gap + testH + 6;
     if (listTop < minTop) listTop = minTop;
     int listH = listBottom - listTop;
     if (listH > 40) {
@@ -534,9 +622,17 @@ void SimpleModeWidget::rebuildChromeLayout() {
         serverScroll->show();
         serverScroll->raise();
         makeTransparent(serverScroll->viewport());
+
+
+
+        // Test button: top-right above the server list
+        const int testX = width() - m - testBtn->width();
+        const int testY = listTop - testH - 6;
+        testBtn->move(testX, testY);
+        testBtn->show();
+        testBtn->raise();
     } else {
         serverScroll->hide();
+        testBtn->hide();
     }
 }
-
-

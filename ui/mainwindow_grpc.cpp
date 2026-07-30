@@ -8,6 +8,7 @@
 #include "ui/widget/MessageBoxTimer.h"
 #include "ui/widget/DetailsPanel.h"
 #include "ui/widget/StatsPanel.h"
+#include "ui/widget/SimpleModeWidget.h"
 
 #include <QTimer>
 #include <QThread>
@@ -52,6 +53,19 @@ void MainWindow::setup_grpc() {
 
     // Looper
     runOnNewThread([=] { NekoGui_traffic::trafficLooper->Loop(); });
+
+    // SimpleMode Phase 1: silent update check + group URL test once core is ready
+    runOnUiThread([] {
+        static bool startupTasksScheduled = false;
+        if (startupTasksScheduled) return;
+        startupTasksScheduled = true;
+        auto *mw = GetMainWindow();
+        if (!mw) return;
+        QTimer::singleShot(1500, mw, [mw] {
+            runOnNewThread([mw] { mw->CheckUpdate(true); });
+            mw->speedtest_current_group(1, true);
+        });
+    });
 #endif
 }
 
@@ -61,7 +75,7 @@ inline bool speedtesting = false;
 inline QList<QThread *> speedtesting_threads = {};
 
 void MainWindow::speedtest_current_group(int mode, bool test_group) {
-    if (speedtesting) {
+    if (speedtesting && mode != 114514) {
         MessageBoxWarning(software_name, QObject::tr("The last speed test did not exit completely, please wait. If it persists, please restart the program."));
         return;
     }
@@ -79,6 +93,7 @@ void MainWindow::speedtest_current_group(int mode, bool test_group) {
             if (t != nullptr) t->exit();
         }
         speedtesting = false;
+        if (simpleMode) simpleMode->setUrlTestBusy(false);
         return;
     }
 
@@ -119,6 +134,7 @@ void MainWindow::speedtest_current_group(int mode, bool test_group) {
         if (full_test_flags.isEmpty()) return;
     }
     speedtesting = true;
+    if (simpleMode) simpleMode->setUrlTestBusy(true);
 
     runOnNewThread([this, profiles, mode, full_test_flags]() {
         QMutex lock_write;
@@ -242,6 +258,9 @@ void MainWindow::speedtest_current_group(int mode, bool test_group) {
         lock_return.unlock();
         speedtesting = false;
         MW_show_log(QObject::tr("Speedtest finished."));
+        runOnUiThread([this] {
+            if (simpleMode) simpleMode->setUrlTestBusy(false);
+        });
     });
 #endif
 }
@@ -575,7 +594,7 @@ void MainWindow::cancelLastAction() {
     }
 }
 
-void MainWindow::CheckUpdate() {
+void MainWindow::CheckUpdate(bool silentIfNoUpdate) {
     // on new thread...
 #ifndef NKR_NO_GRPC
     bool ok;
@@ -587,6 +606,7 @@ void MainWindow::CheckUpdate() {
 
     auto err = response.error();
     if (!err.empty()) {
+        if (silentIfNoUpdate) return;
         runOnUiThread([=] {
             MessageBoxWarning(QObject::tr("Update"), err.c_str());
         });
@@ -594,6 +614,7 @@ void MainWindow::CheckUpdate() {
     }
 
     if (response.release_download_url() == nullptr) {
+        if (silentIfNoUpdate) return;
         runOnUiThread([=] {
             MessageBoxInfo(QObject::tr("Update"), QObject::tr("No update"));
         });

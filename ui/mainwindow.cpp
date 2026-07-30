@@ -165,6 +165,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         MW_dialog_message("", "UpdateDataStore,RouteChanged");
         MessageBoxInfo(software_name, tr("Rules saved"));
     });
+    connect(simpleMode, &SimpleModeWidget::requestCheckUpdate, this, [=] {
+        runOnNewThread([=] { CheckUpdate(false); });
+    });
+    connect(simpleMode, &SimpleModeWidget::requestUrlTest, this, [=] {
+        speedtest_current_group(1, true);
+    });
     connect(simpleMode, &SimpleModeWidget::requestPowerToggle, this, [=](bool turnOn, int profileId) {
         if (turnOn) {
             if (profileId < 0) {
@@ -1540,6 +1546,10 @@ void MainWindow::refresh_proxy_list_impl_refresh_data(const int &id) {
         f = f0->clone();
         f->setText(profile->traffic_data->DisplayTraffic());
         ui->proxyListTable->setItem(row, 4, f);
+    }
+
+    if (simpleMode) {
+        simpleMode->updateServerLatency(id);
     }
 }
 

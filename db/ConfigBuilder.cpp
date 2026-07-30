@@ -870,6 +870,13 @@ namespace NekoGui {
                                  {"process_name", QList2QJsonArray(autoBypassExternalProcessPaths)}};
                 status->routingRules += rule;
             }
+
+            // Keep core (and GUI) off the TUN path so URL Test temp instances and
+            // control-plane dials never loop through the active VPN.
+            status->routingRules += QJsonObject{
+                {"outbound", "bypass"},
+                {"process_name", QJsonArray{"nekobox_core.exe", "nekobox_core", "nekobox.exe", "nekobox"}},
+            };
         }
 
         // geopath assets are optional now (UI autocomplete / legacy); routing uses remote rule-set
@@ -902,7 +909,8 @@ namespace NekoGui {
         }
         auto routeObj = QJsonObject{
             {"rules", normalizedRules},
-            {"auto_detect_interface", dataStore->spmode_vpn}, // TODO force enable?
+            // forTest: always leave TUN so latency dials use the physical interface
+            {"auto_detect_interface", status->forTest || dataStore->spmode_vpn},
             {"find_process", !status->forTest},
         };
         if (!routeRuleSets.isEmpty()) routeObj["rule_set"] = routeRuleSets;

@@ -31,6 +31,8 @@ public:
     void refreshServers();
     void refreshPowerState();
     void reloadBackground();
+    void updateServerLatency(int profileId = -1);
+    void setUrlTestBusy(bool busy);
     void pushTrafficSample(qint64 proxyUpRate, qint64 proxyDownRate,
                            qint64 directUpRate, qint64 directDownRate);
 
@@ -41,6 +43,8 @@ signals:
     void requestToggleBackground();
     void requestPowerToggle(bool turnOn, int profileId);
     void requestEditRules();
+    void requestCheckUpdate();
+    void requestUrlTest();
 
 
 
@@ -61,6 +65,7 @@ private:
     int selectedProfileId() const;
     void applyChromeButtonStyle(QPushButton *b);
     void applyServerCardStyle(QPushButton *card, bool checked);
+    void applyLatencyLabel(QLabel *label, int latency);
 
 
 
@@ -76,8 +81,10 @@ private:
 
     QPixmap bg;
     QPushButton *advancedBtn = nullptr;
+    QPushButton *updateBtn = nullptr;
     QPushButton *bgBtn = nullptr;
     QPushButton *rulesBtn = nullptr;
+    QPushButton *testBtn = nullptr;
 
 
 
@@ -98,7 +105,9 @@ private:
     QWidget *serverListHost = nullptr;
     QVBoxLayout *serverListLayout = nullptr;
     QList<QPushButton *> serverCards;
+    QList<QLabel *> serverLatencyLabels;
     int selectedId = -1;
+    bool urlTestBusy = false;
 
 
 
@@ -107,5 +116,3 @@ private:
     QVector<double> directUpHist;
     QVector<double> directDownHist;
 };
-
-
