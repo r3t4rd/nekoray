@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,78 @@ func currentNekoVersion() string {
 	v = strings.TrimPrefix(v, "nekoray-")
 	v = strings.TrimPrefix(v, "nekobox-")
 	return v
+}
+
+// nekoVersionCompare compares asset versions like "5-2026-07-31.1".
+// Returns -1 if a<b, 0 if equal, 1 if a>b.
+func nekoVersionCompare(a, b string) int {
+	ay, am, ad, ap, aok := parseNekoVersion(a)
+	by, bm, bd, bp, bok := parseNekoVersion(b)
+	if !aok && !bok {
+		return strings.Compare(a, b)
+	}
+	if !aok {
+		return -1
+	}
+	if !bok {
+		return 1
+	}
+	if ay != by {
+		if ay > by {
+			return 1
+		}
+		return -1
+	}
+	if am != bm {
+		if am > bm {
+			return 1
+		}
+		return -1
+	}
+	if ad != bd {
+		if ad > bd {
+			return 1
+		}
+		return -1
+	}
+	if ap != bp {
+		if ap > bp {
+			return 1
+		}
+		return -1
+	}
+	return 0
+}
+
+func parseNekoVersion(s string) (year, month, day, patch int, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return
+	}
+	// "5-2026-07-31.1" -> major + date + optional patch
+	dash := strings.IndexByte(s, '-')
+	if dash < 0 {
+		return
+	}
+	rest := s[dash+1:]
+	patch = 0
+	if dot := strings.IndexByte(rest, '.'); dot >= 0 {
+		if p, err := strconv.Atoi(rest[dot+1:]); err == nil {
+			patch = p
+		}
+		rest = rest[:dot]
+	}
+	parts := strings.Split(rest, "-")
+	if len(parts) != 3 {
+		return
+	}
+	y, err1 := strconv.Atoi(parts[0])
+	m, err2 := strconv.Atoi(parts[1])
+	d, err3 := strconv.Atoi(parts[2])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return
+	}
+	return y, m, d, patch, true
 }
 
 func updateZipPath() string {
@@ -104,6 +177,7 @@ func (s *BaseServer) Update(ctx context.Context, in *gen.UpdateReq) (*gen.Update
 			return ret, nil
 		}
 
+		var bestVer string
 		for _, release := range v {
 			if len(release.Assets) == 0 {
 				continue
@@ -116,21 +190,29 @@ func (s *BaseServer) Update(ctx context.Context, in *gen.UpdateReq) (*gen.Update
 					continue
 				}
 				ver := assetVersion(asset.Name, search)
-				// Already on this build (or asset has no parseable version but name still embeds it)
-				if ver != "" && ver == nowVer {
-					return ret, nil // No update
+				if ver == "" {
+					if strings.Contains(asset.Name, nowVer) {
+						continue
+					}
+					// Unparseable version — ignore (do not treat as newer)
+					continue
 				}
-				if ver == "" && strings.Contains(asset.Name, nowVer) {
-					return ret, nil // No update
+				if nekoVersionCompare(ver, nowVer) <= 0 {
+					continue
 				}
-				update_download_url = asset.BrowserDownloadUrl
-				ret.AssetsName = asset.Name
-				ret.DownloadUrl = asset.BrowserDownloadUrl
-				ret.ReleaseUrl = release.HtmlUrl
-				ret.ReleaseNote = release.Body
-				ret.IsPreRelease = release.Prerelease
-				return ret, nil // update
+				if bestVer == "" || nekoVersionCompare(ver, bestVer) > 0 {
+					bestVer = ver
+					update_download_url = asset.BrowserDownloadUrl
+					ret.AssetsName = asset.Name
+					ret.DownloadUrl = asset.BrowserDownloadUrl
+					ret.ReleaseUrl = release.HtmlUrl
+					ret.ReleaseNote = release.Body
+					ret.IsPreRelease = release.Prerelease
+				}
 			}
+		}
+		if bestVer != "" {
+			return ret, nil // update available
 		}
 	} else { // Download update
 		if update_download_url == "" {

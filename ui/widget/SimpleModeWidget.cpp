@@ -19,6 +19,7 @@
 #include <QResizeEvent>
 #include <QEvent>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include <QPalette>
 #include <QSizePolicy>
 #include <QFontMetrics>
@@ -41,6 +42,7 @@ static void makeTransparent(QWidget *w) {
 SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
     setObjectName("SimpleModeWidget");
     setAttribute(Qt::WA_OpaquePaintEvent, true);
+    setFocusPolicy(Qt::StrongFocus);
 
 
 
@@ -183,6 +185,28 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
 
 
 
+    groupScroll = new QScrollArea(this);
+    groupScroll->setObjectName("simpleGroupScroll");
+    groupScroll->setFrameShape(QFrame::NoFrame);
+    groupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    groupScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    groupScroll->setWidgetResizable(true);
+    makeTransparent(groupScroll);
+    makeTransparent(groupScroll->viewport());
+    groupScroll->setStyleSheet(
+        "QScrollArea#simpleGroupScroll { background: transparent; border: none; }"
+        "QScrollBar:horizontal { height: 4px; background: transparent; }"
+        "QScrollBar::handle:horizontal { background: rgba(255,255,255,70); border-radius: 2px; }");
+
+    groupBar = new QWidget;
+    makeTransparent(groupBar);
+    groupBarLayout = new QHBoxLayout(groupBar);
+    groupBarLayout->setContentsMargins(12, 0, 12, 0);
+    groupBarLayout->setSpacing(6);
+    groupScroll->setWidget(groupBar);
+
+
+
     connect(advancedBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestAdvancedMode);
     connect(updateBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestCheckUpdate);
     connect(bgBtn, &QPushButton::clicked, this, &SimpleModeWidget::requestToggleBackground);
@@ -199,6 +223,7 @@ SimpleModeWidget::SimpleModeWidget(QWidget *parent) : QWidget(parent) {
 
 
     reloadBackground();
+    refreshGroupTabs();
     refreshServers();
     refreshPowerState();
 }
@@ -360,6 +385,50 @@ void SimpleModeWidget::updateServerLatency(int profileId) {
         if (!pf || i >= serverLatencyLabels.size()) continue;
         applyLatencyLabel(serverLatencyLabels[i], pf->latency);
     }
+}
+
+
+
+void SimpleModeWidget::refreshGroupTabs() {
+    if (!groupBarLayout) return;
+    while (groupBarLayout->count() > 0) {
+        auto *item = groupBarLayout->takeAt(0);
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    groupTabButtons.clear();
+
+    const int currentGid = NekoGui::dataStore->current_group;
+    for (const auto gid: NekoGui::profileManager->groupsTabOrder) {
+        auto group = NekoGui::profileManager->GetGroup(gid);
+        if (!group) continue;
+        auto *b = new QPushButton(group->name, groupBar);
+        b->setCheckable(true);
+        b->setChecked(gid == currentGid);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setFixedHeight(26);
+        applyChromeButtonStyle(b);
+        if (gid == currentGid) {
+            b->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(28,36,56,210);"
+                "  color: #f0f0f3;"
+                "  border: 1px solid rgba(140,170,220,120);"
+                "  border-radius: 9px;"
+                "  padding: 2px 10px;"
+                "  font-weight: 600;"
+                "}"
+                "QPushButton:hover { background: rgba(32,40,60,220); }");
+        }
+        connect(b, &QPushButton::clicked, this, [=] {
+            if (gid == NekoGui::dataStore->current_group) return;
+            emit requestSelectGroup(gid);
+        });
+        groupBarLayout->addWidget(b);
+        groupTabButtons << b;
+    }
+    groupBarLayout->addStretch(1);
+    groupBar->adjustSize();
 }
 
 
@@ -554,6 +623,17 @@ bool SimpleModeWidget::eventFilter(QObject *obj, QEvent *event) {
 
 
 
+void SimpleModeWidget::keyPressEvent(QKeyEvent *event) {
+    if (event->matches(QKeySequence::Paste)) {
+        emit requestPasteFromClipboard();
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent(event);
+}
+
+
+
 void SimpleModeWidget::rebuildChromeLayout() {
     const int m = 12;
     advancedBtn->adjustSize();
@@ -608,16 +688,22 @@ void SimpleModeWidget::rebuildChromeLayout() {
 
 
 
-    // Full-width list, max 30% of window, pinned to bottom — no phantom stretch
-    const int listMaxH = qMax(72, (int) (height() * 0.30));
+    // Full-width list, pinned to bottom (taller than before)
+    const int listMaxH = qMax(88, (int) (height() * kListHeightFraction));
     const int gap = 10;
     const int testH = testBtn->sizeHint().height();
+    const int groupH = 28;
     int listBottom = height() - 10;
     int listTop = listBottom - listMaxH;
-    const int minTop = heroSub->geometry().bottom() + gap + testH + 6;
+    const int minTop = heroSub->geometry().bottom() + gap + groupH + 6 + testH + 6;
     if (listTop < minTop) listTop = minTop;
     int listH = listBottom - listTop;
     if (listH > 40) {
+        const int groupY = listTop - groupH - 4;
+        groupScroll->setGeometry(0, groupY, width(), groupH);
+        groupScroll->show();
+        groupScroll->raise();
+
         serverScroll->setGeometry(0, listTop, width(), listH);
         serverScroll->show();
         serverScroll->raise();
@@ -627,11 +713,12 @@ void SimpleModeWidget::rebuildChromeLayout() {
 
         // Test button: top-right above the server list
         const int testX = width() - m - testBtn->width();
-        const int testY = listTop - testH - 6;
+        const int testY = groupY - testH - 6;
         testBtn->move(testX, testY);
         testBtn->show();
         testBtn->raise();
     } else {
+        groupScroll->hide();
         serverScroll->hide();
         testBtn->hide();
     }

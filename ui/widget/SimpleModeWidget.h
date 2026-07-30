@@ -13,6 +13,7 @@ class QPushButton;
 class QLabel;
 class QScrollArea;
 class QVBoxLayout;
+class QHBoxLayout;
 class QFrame;
 class TrafficSparkline;
 
@@ -29,6 +30,7 @@ public:
 
 
     void refreshServers();
+    void refreshGroupTabs();
     void refreshPowerState();
     void reloadBackground();
     void updateServerLatency(int profileId = -1);
@@ -45,6 +47,8 @@ signals:
     void requestEditRules();
     void requestCheckUpdate();
     void requestUrlTest();
+    void requestPasteFromClipboard();
+    void requestSelectGroup(int groupId);
 
 
 
@@ -52,6 +56,7 @@ protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     bool eventFilter(QObject *obj, QEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 
 
@@ -76,6 +81,7 @@ private:
     static constexpr int kHeroW = 584;
     static constexpr int kHeroH = 140;
     static constexpr int kHistWindow = 60;
+    static constexpr double kListHeightFraction = 0.37;
 
 
 
@@ -85,6 +91,13 @@ private:
     QPushButton *bgBtn = nullptr;
     QPushButton *rulesBtn = nullptr;
     QPushButton *testBtn = nullptr;
+
+
+
+    QWidget *groupBar = nullptr;
+    QHBoxLayout *groupBarLayout = nullptr;
+    QScrollArea *groupScroll = nullptr;
+    QList<QPushButton *> groupTabButtons;
 
 
 

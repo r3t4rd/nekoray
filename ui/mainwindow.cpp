@@ -171,6 +171,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(simpleMode, &SimpleModeWidget::requestUrlTest, this, [=] {
         speedtest_current_group(1, true);
     });
+    connect(simpleMode, &SimpleModeWidget::requestPasteFromClipboard, this,
+            &MainWindow::on_menu_add_from_clipboard_triggered);
+    connect(simpleMode, &SimpleModeWidget::requestSelectGroup, this, &MainWindow::show_group);
     connect(simpleMode, &SimpleModeWidget::requestPowerToggle, this, [=](bool turnOn, int profileId) {
         if (turnOn) {
             if (profileId < 0) {
@@ -617,6 +620,10 @@ void MainWindow::show_group(int gid) {
     refresh_proxy_list_impl(-1, gsa);
 
     NekoGui::dataStore->refreshing_group = false;
+    if (simpleMode && simpleMode->isVisible()) {
+        simpleMode->refreshGroupTabs();
+        simpleMode->refreshServers();
+    }
 }
 
 // callback
@@ -1062,9 +1069,11 @@ void MainWindow::applyUiMode(bool simple) {
         }
         simpleMode->show();
         simpleMode->raise();
+        simpleMode->refreshGroupTabs();
         simpleMode->refreshServers();
         simpleMode->reloadBackground();
         simpleMode->refreshPowerState();
+        simpleMode->setFocus(Qt::OtherFocusReason);
 
         // Portrait window ~824:1280
         setMinimumSize(360, 560);
@@ -1401,7 +1410,10 @@ void MainWindow::refresh_groups() {
     }
 
     NekoGui::dataStore->refreshing_group_list = false;
-    if (simpleMode && simpleMode->isVisible()) simpleMode->refreshServers();
+    if (simpleMode && simpleMode->isVisible()) {
+        simpleMode->refreshGroupTabs();
+        simpleMode->refreshServers();
+    }
 }
 
 void MainWindow::refresh_proxy_list(const int &id) {
