@@ -163,7 +163,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         NekoGui::dataStore->routing->Save();
         NekoGui::dataStore->Save();
         MW_dialog_message("", "UpdateDataStore,RouteChanged");
-        MessageBoxInfo(software_name, tr("Rules saved"));
     });
     connect(simpleMode, &SimpleModeWidget::requestCheckUpdate, this, [=] {
         runOnNewThread([=] { CheckUpdate(false); });
@@ -175,6 +174,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             &MainWindow::on_menu_add_from_clipboard_triggered);
     connect(simpleMode, &SimpleModeWidget::requestSelectGroup, this, &MainWindow::show_group);
     connect(simpleMode, &SimpleModeWidget::requestPowerToggle, this, [=](bool turnOn, int profileId) {
+        if (simpleMode->isConnectionBusy()) return;
         if (turnOn) {
             if (profileId < 0) {
                 MessageBoxWarning(software_name, tr("Select a server first"));
@@ -198,13 +198,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             if (NekoGui::dataStore->spmode_vpn) {
                 neko_start(profileId);
             }
+            simpleMode->refreshPowerState();
         } else {
-            neko_stop();
+            // Disconnect: show "Отключаюсь", stop profile, turn VPN off WITHOUT
+            // calling neko_start (neko_set_spmode_vpn would restart while stop runs).
+            simpleMode->setDisconnecting(true);
             if (NekoGui::dataStore->spmode_vpn) {
-                neko_set_spmode_vpn(false, true);
+                NekoGui::dataStore->remember_spmode.removeAll("vpn");
+                NekoGui::dataStore->spmode_vpn = false;
+                NekoGui::dataStore->Save();
+                refresh_status();
             }
+            neko_stop();
         }
-        simpleMode->refreshPowerState();
     });
 
     // Program menu: switch to Simple

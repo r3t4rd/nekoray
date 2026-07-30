@@ -35,6 +35,8 @@ public:
     void reloadBackground();
     void updateServerLatency(int profileId = -1);
     void setUrlTestBusy(bool busy);
+    void setDisconnecting(bool on);
+    [[nodiscard]] bool isConnectionBusy() const;
     void pushTrafficSample(qint64 proxyUpRate, qint64 proxyDownRate,
                            qint64 directUpRate, qint64 directDownRate);
 
@@ -121,6 +123,7 @@ private:
     QList<QLabel *> serverLatencyLabels;
     int selectedId = -1;
     bool urlTestBusy = false;
+    bool disconnecting = false;
 
 
 

@@ -331,6 +331,26 @@ void SimpleModeWidget::setUrlTestBusy(bool busy) {
 
 
 
+void SimpleModeWidget::setDisconnecting(bool on) {
+    disconnecting = on;
+    if (hero) {
+        hero->setEnabled(!on);
+        hero->setCursor(on ? Qt::BusyCursor : Qt::PointingHandCursor);
+    }
+    for (auto *c: serverCards) {
+        if (c) c->setEnabled(!on);
+    }
+    updateHeroText();
+}
+
+
+
+bool SimpleModeWidget::isConnectionBusy() const {
+    return disconnecting;
+}
+
+
+
 void SimpleModeWidget::updateSpeedLabels(qint64 proxyUpRate, qint64 proxyDownRate,
                                          qint64 directUpRate, qint64 directDownRate) {
     speedProxy->setText(QStringLiteral("<span style='color:%1'>Proxy ↑ %2</span>  "
@@ -500,6 +520,7 @@ void SimpleModeWidget::refreshServers() {
 
 
         connect(card, &QPushButton::clicked, this, [=] {
+            if (disconnecting) return;
             selectedId = pf->id;
             NekoGui::dataStore->simple_last_profile_id = pf->id;
             NekoGui::dataStore->Save();
@@ -507,7 +528,9 @@ void SimpleModeWidget::refreshServers() {
                 bool on = c->property("profileId").toInt() == selectedId;
                 c->setChecked(on);
             }
-            emit requestPowerToggle(true, selectedId);
+            // Clicking the already-connected profile = disconnect
+            const bool connectedToThis = NekoGui::dataStore->started_id == pf->id;
+            emit requestPowerToggle(!connectedToThis, selectedId);
         });
 
 
@@ -555,6 +578,13 @@ void SimpleModeWidget::fitHeroTitleFont() {
 
 
 void SimpleModeWidget::updateHeroText() {
+    if (disconnecting) {
+        heroTitle->setText(tr("Отключаюсь"));
+        heroSub->setText(tr("Disconnecting…"));
+        heroSub->setStyleSheet("color: #e8c48a; font-size: 13px; font-weight: 600; background: transparent;");
+        fitHeroTitleFont();
+        return;
+    }
     bool on = NekoGui::dataStore->started_id >= 0;
     if (on) {
         auto ent = NekoGui::profileManager->GetProfile(NekoGui::dataStore->started_id);
@@ -573,8 +603,19 @@ void SimpleModeWidget::updateHeroText() {
 
 
 void SimpleModeWidget::refreshPowerState() {
+    // Stop finished — clear disconnecting lock and show "Подключись"
+    if (disconnecting && NekoGui::dataStore->started_id < 0) {
+        disconnecting = false;
+        if (hero) {
+            hero->setEnabled(true);
+            hero->setCursor(Qt::PointingHandCursor);
+        }
+        for (auto *c: serverCards) {
+            if (c) c->setEnabled(true);
+        }
+    }
     bool on = NekoGui::dataStore->started_id >= 0;
-    if (on) {
+    if (on && !disconnecting) {
         selectedId = NekoGui::dataStore->started_id;
         for (auto *c: serverCards) {
             c->setChecked(c->property("profileId").toInt() == selectedId);
@@ -610,6 +651,7 @@ void SimpleModeWidget::resizeEvent(QResizeEvent *e) {
 
 bool SimpleModeWidget::eventFilter(QObject *obj, QEvent *event) {
     if (obj == hero && event->type() == QEvent::MouseButtonRelease) {
+        if (disconnecting) return true;
         bool on = NekoGui::dataStore->started_id >= 0;
         int id = selectedId;
         if (id < 0 && !serverCards.isEmpty()) {

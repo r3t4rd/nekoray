@@ -281,8 +281,8 @@ SimpleRouteEditor::SimpleRouteEditor(QWidget *parent) : QDialog(parent) {
     auto *root = new QVBoxLayout(this);
     auto *hint = new QLabel(
         tr("Same data as Advanced → Custom Route.\n"
-           "Use “Sites/Apps by server” to send traffic through a specific node "
-           "while connected to another."),
+           "Priority (highest first): Sites/Apps by server → Sites → Apps.\n"
+           "Restart the tunnel after saving if it asks."),
         this);
     hint->setWordWrap(true);
     hint->setStyleSheet("color:#666; margin-bottom:6px;");
@@ -495,12 +495,8 @@ QString SimpleRouteEditor::toJson() const {
         }
     };
 
-    pushDomain(directSites.list, "direct");
-    pushDomain(proxySites.list, "proxy");
-    pushProc(directApps.list, "direct");
-    pushProc(proxyApps.list, "proxy");
-
-    // Group split-routing matchers by outbound tag
+    // sing-box: first matching rule wins. Priority (highest → lowest):
+    // 1) Sites by server  2) Apps by server  3) Direct/Proxy sites  4) Direct/Proxy apps
     auto pushServerMap = [&](QListWidget *list, bool isDomain) {
         if (!list) return;
         QMap<QString, QJsonArray> byOutbound;
@@ -524,6 +520,11 @@ QString SimpleRouteEditor::toJson() const {
     };
     pushServerMap(serverSites.list, true);
     pushServerMap(serverApps.list, false);
+    // Sites before apps: domain rules beat process (2ip.ru Direct wins over opera.exe Proxy).
+    pushDomain(directSites.list, "direct");
+    pushDomain(proxySites.list, "proxy");
+    pushProc(directApps.list, "direct");
+    pushProc(proxyApps.list, "proxy");
 
     for (const auto &raw: otherRulesJson) {
         auto d = QJsonDocument::fromJson(raw.toUtf8());

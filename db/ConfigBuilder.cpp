@@ -987,31 +987,65 @@ namespace NekoGui {
         }
         const QString startedProfileTag = ProfileOutboundTag(status->ent->id);
 
-        QJsonArray normalizedRules;
-        for (const auto &item: routingRules) {
-            auto rule = item.toObject();
+        // Priority buckets (sing-box: first match wins):
+        // 0 Sites by server (domain → p-*)
+        // 1 Apps by server  (process → p-*)
+        // 2 Direct/Proxy sites (domain → proxy/direct)
+        // 3 Direct/Proxy apps (process → proxy/direct) — lowest among friendly rules
+        // 4 everything else (custom / system)
+        QJsonArray bucketServerSites, bucketServerApps, bucketSites, bucketApps, bucketOther;
+
+        auto classifyAndPush = [&](QJsonObject rule) {
             auto out = rule.value("outbound").toString();
             if (out == "block") {
                 rule.remove("outbound");
                 rule["action"] = "reject";
+                out.clear();
             } else if (out == "dns-out" || out == "dns") {
                 rule.remove("outbound");
                 rule["action"] = "hijack-dns";
+                out.clear();
             } else if (out == startedProfileTag) {
-                // Started profile is tagged "proxy", not p-<id>
                 rule["outbound"] = "proxy";
+                out = "proxy";
             } else if (out.startsWith(QStringLiteral("p-")) && !outboundTags.contains(out)) {
-                // Target profile missing from this build — drop the rule
-                continue;
+                return; // missing split outbound
             }
 
-            // Quietly cut deprecated geoip/geosite/source_geoip (do not convert — drop the rule if empty)
             for (const auto &k: {QStringLiteral("geoip"), QStringLiteral("geosite"), QStringLiteral("source_geoip")}) {
                 rule.remove(k);
             }
-            if (!ruleHasMatchersLeft(rule)) continue;
-            normalizedRules += rule;
+            if (!ruleHasMatchersLeft(rule)) return;
+
+            const bool hasDomain = rule.contains("domain_suffix") || rule.contains("domain") ||
+                                   rule.contains("domain_keyword") || rule.contains("domain_regex");
+            const bool hasProc = rule.contains("process_name") || rule.contains("process_path");
+            const bool isSplit = out.startsWith(QStringLiteral("p-"));
+            const bool isBasicOut = (out == "proxy" || out == "direct" || out == "bypass");
+
+            if (hasDomain && !hasProc && isSplit) {
+                bucketServerSites += rule;
+            } else if (hasProc && !hasDomain && isSplit) {
+                bucketServerApps += rule;
+            } else if (hasDomain && !hasProc && isBasicOut) {
+                bucketSites += rule;
+            } else if (hasProc && !hasDomain && isBasicOut) {
+                bucketApps += rule;
+            } else {
+                bucketOther += rule;
+            }
+        };
+
+        for (const auto &item: routingRules) {
+            if (item.isObject()) classifyAndPush(item.toObject());
         }
+
+        QJsonArray normalizedRules;
+        QJSONARRAY_ADD(normalizedRules, bucketServerSites)
+        QJSONARRAY_ADD(normalizedRules, bucketServerApps)
+        QJSONARRAY_ADD(normalizedRules, bucketSites)
+        QJSONARRAY_ADD(normalizedRules, bucketApps)
+        QJSONARRAY_ADD(normalizedRules, bucketOther)
         auto routeObj = QJsonObject{
             {"rules", normalizedRules},
             // forTest: always leave TUN so latency dials use the physical interface
