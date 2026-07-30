@@ -1,5 +1,9 @@
 #include "SimpleRouteEditor.h"
 
+#include "db/Database.hpp"
+#include "db/ConfigBuilder.hpp"
+#include "main/NekoGui.hpp"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -17,6 +21,14 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QFontDatabase>
+#include <QComboBox>
+#include <QMap>
+
+namespace {
+constexpr int kRoleMatcher = Qt::UserRole;
+constexpr int kRoleProfileId = Qt::UserRole + 1;
+constexpr int kRoleOutbound = Qt::UserRole + 2;
+} // namespace
 
 void SimpleRouteEditor::addListRow(QListWidget *list, const QString &text) {
     auto t = text.trimmed();
@@ -40,6 +52,58 @@ QJsonArray SimpleRouteEditor::collectList(QListWidget *list) {
     if (!list) return arr;
     for (int i = 0; i < list->count(); ++i) arr += list->item(i)->text();
     return arr;
+}
+
+QString SimpleRouteEditor::profileOutboundTag(int profileId) {
+    return NekoGui::ProfileOutboundTag(profileId);
+}
+
+int SimpleRouteEditor::profileIdFromOutboundTag(const QString &tag) {
+    if (!tag.startsWith(QStringLiteral("p-"))) return -1;
+    bool ok = false;
+    const int id = tag.mid(2).toInt(&ok);
+    return ok ? id : -1;
+}
+
+QString SimpleRouteEditor::displayNameForProfile(int profileId) const {
+    auto pf = NekoGui::profileManager->GetProfile(profileId);
+    if (pf && pf->bean) return pf->bean->DisplayName();
+    return QStringLiteral("#%1").arg(profileId);
+}
+
+void SimpleRouteEditor::refillServerCombo(QComboBox *box) {
+    if (!box) return;
+    const int prev = box->currentData().toInt();
+    box->clear();
+    auto group = NekoGui::profileManager->CurrentGroup();
+    if (!group) return;
+    for (const auto &pf: group->ProfilesWithOrder()) {
+        if (!pf || !pf->bean) continue;
+        box->addItem(pf->bean->DisplayName(), pf->id);
+    }
+    if (prev >= 0) {
+        const int idx = box->findData(prev);
+        if (idx >= 0) box->setCurrentIndex(idx);
+    }
+}
+
+void SimpleRouteEditor::addServerMapRow(QListWidget *list, const QString &matcher, int profileId) {
+    auto t = matcher.trimmed();
+    if (t.isEmpty() || !list || profileId < 0) return;
+    const QString outbound = profileOutboundTag(profileId);
+    for (int i = 0; i < list->count(); ++i) {
+        auto *it = list->item(i);
+        if (it->data(kRoleMatcher).toString().compare(t, Qt::CaseInsensitive) == 0 &&
+            it->data(kRoleProfileId).toInt() == profileId) {
+            return;
+        }
+    }
+    auto *item = new QListWidgetItem(
+        QStringLiteral("%1  →  %2").arg(t, displayNameForProfile(profileId)), list);
+    item->setData(kRoleMatcher, t);
+    item->setData(kRoleProfileId, profileId);
+    item->setData(kRoleOutbound, outbound);
+    list->addItem(item);
 }
 
 SimpleRouteEditor::ListPage SimpleRouteEditor::makeDomainPage(QWidget *parent, const QString &placeholder) {
@@ -109,14 +173,116 @@ SimpleRouteEditor::ListPage SimpleRouteEditor::makeAppPage(QWidget *parent, cons
     return page;
 }
 
+SimpleRouteEditor::ServerMapPage SimpleRouteEditor::makeServerDomainPage(QWidget *parent) {
+    ServerMapPage page;
+    auto *lay = new QVBoxLayout(parent);
+    auto *hint = new QLabel(tr("Route specific sites through a chosen server "
+                               "(even if another server is currently connected)."),
+                            parent);
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color:#666;");
+    lay->addWidget(hint);
+
+    page.list = new QListWidget(parent);
+    page.list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    lay->addWidget(page.list, 1);
+
+    auto *row = new QHBoxLayout;
+    page.server = new QComboBox(parent);
+    page.server->setMinimumWidth(140);
+    refillServerCombo(page.server);
+    page.edit = new QLineEdit(parent);
+    page.edit->setPlaceholderText(tr("2ip.ru  or  .example.com"));
+    auto *addBtn = new QPushButton(tr("Add"), parent);
+    auto *delBtn = new QPushButton(tr("Remove"), parent);
+    row->addWidget(page.server);
+    row->addWidget(page.edit, 1);
+    row->addWidget(addBtn);
+    row->addWidget(delBtn);
+    lay->addLayout(row);
+
+    connect(addBtn, &QPushButton::clicked, this, [=] {
+        if (page.server->currentIndex() < 0) {
+            QMessageBox::warning(this, tr("Sites by server"), tr("Select a server first."));
+            return;
+        }
+        addServerMapRow(page.list, page.edit->text(), page.server->currentData().toInt());
+        page.edit->clear();
+    });
+    connect(delBtn, &QPushButton::clicked, this, [=] { removeSelected(page.list); });
+    connect(page.edit, &QLineEdit::returnPressed, this, [=] {
+        if (page.server->currentIndex() < 0) return;
+        addServerMapRow(page.list, page.edit->text(), page.server->currentData().toInt());
+        page.edit->clear();
+    });
+    return page;
+}
+
+SimpleRouteEditor::ServerMapPage SimpleRouteEditor::makeServerAppPage(QWidget *parent) {
+    ServerMapPage page;
+    auto *lay = new QVBoxLayout(parent);
+    auto *hint = new QLabel(tr("Route specific apps through a chosen server. "
+                               "Requires Tun/VPN mode (process matching)."),
+                            parent);
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color:#666;");
+    lay->addWidget(hint);
+
+    page.list = new QListWidget(parent);
+    page.list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    lay->addWidget(page.list, 1);
+
+    auto *row = new QHBoxLayout;
+    page.server = new QComboBox(parent);
+    page.server->setMinimumWidth(140);
+    refillServerCombo(page.server);
+    page.edit = new QLineEdit(parent);
+    page.edit->setPlaceholderText(tr("opera.exe"));
+    auto *addBtn = new QPushButton(tr("Add"), parent);
+    auto *browseBtn = new QPushButton(tr("Browse…"), parent);
+    auto *delBtn = new QPushButton(tr("Remove"), parent);
+    row->addWidget(page.server);
+    row->addWidget(page.edit, 1);
+    row->addWidget(addBtn);
+    row->addWidget(browseBtn);
+    row->addWidget(delBtn);
+    lay->addLayout(row);
+
+    auto addCurrent = [=] {
+        if (page.server->currentIndex() < 0) {
+            QMessageBox::warning(this, tr("Apps by server"), tr("Select a server first."));
+            return;
+        }
+        addServerMapRow(page.list, page.edit->text(), page.server->currentData().toInt());
+        page.edit->clear();
+    };
+    connect(addBtn, &QPushButton::clicked, this, addCurrent);
+    connect(delBtn, &QPushButton::clicked, this, [=] { removeSelected(page.list); });
+    connect(page.edit, &QLineEdit::returnPressed, this, addCurrent);
+    connect(browseBtn, &QPushButton::clicked, this, [=] {
+        auto path = QFileDialog::getOpenFileName(this, tr("Select application"), QString(),
+#ifdef Q_OS_WIN
+                                                 tr("Programs (*.exe);;All (*.*)")
+#else
+                                                 tr("All (*.*)")
+#endif
+        );
+        if (path.isEmpty()) return;
+        page.edit->setText(QFileInfo(path).fileName());
+        addCurrent();
+    });
+    return page;
+}
+
 SimpleRouteEditor::SimpleRouteEditor(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Connection Rules"));
-    resize(520, 600);
+    resize(560, 640);
 
     auto *root = new QVBoxLayout(this);
     auto *hint = new QLabel(
         tr("Same data as Advanced → Custom Route.\n"
-           "Loads both scheme Custom Route and Custom Route (global)."),
+           "Use “Sites/Apps by server” to send traffic through a specific node "
+           "while connected to another."),
         this);
     hint->setWordWrap(true);
     hint->setStyleSheet("color:#666; margin-bottom:6px;");
@@ -139,6 +305,14 @@ SimpleRouteEditor::SimpleRouteEditor(QWidget *parent) : QDialog(parent) {
     auto *pa = new QWidget;
     proxyApps = makeAppPage(pa, tr("Discord.exe"));
     tabs->addTab(pa, tr("Proxy apps"));
+
+    auto *ss = new QWidget;
+    serverSites = makeServerDomainPage(ss);
+    tabs->addTab(ss, tr("Sites by server"));
+
+    auto *sa = new QWidget;
+    serverApps = makeServerAppPage(sa);
+    tabs->addTab(sa, tr("Apps by server"));
 
     auto *jsonPage = new QWidget;
     auto *jsonLay = new QVBoxLayout(jsonPage);
@@ -166,6 +340,9 @@ SimpleRouteEditor::SimpleRouteEditor(QWidget *parent) : QDialog(parent) {
         } else if (index == jsonIndex) {
             syncJsonFromLists();
         }
+        // Refresh server lists when opening split-routing tabs
+        if (index == 4) refillServerCombo(serverSites.server);
+        if (index == 5) refillServerCombo(serverApps.server);
         lastTabIndex = index;
     });
 
@@ -178,6 +355,13 @@ SimpleRouteEditor::SimpleRouteEditor(QWidget *parent) : QDialog(parent) {
         accept();
     });
     connect(box, &QDialogButtonBox::rejected, this, &QDialog::reject);
+}
+
+void SimpleRouteEditor::clearFriendlyLists() {
+    for (auto *list: {directSites.list, proxySites.list, directApps.list, proxyApps.list,
+                      serverSites.list, serverApps.list}) {
+        if (list) list->clear();
+    }
 }
 
 void SimpleRouteEditor::parseRulesIntoLists(const QJsonArray &rules) {
@@ -203,7 +387,16 @@ void SimpleRouteEditor::parseRulesIntoLists(const QJsonArray &rules) {
             otherRulesJson << QString::fromUtf8(QJsonDocument(rule).toJson(QJsonDocument::Compact));
             continue;
         }
+
+        const int splitId = profileIdFromOutboundTag(outbound);
+
         if (hasDomain) {
+            if (splitId >= 0) {
+                for (const auto &d: rule.value("domain_suffix").toArray()) {
+                    addServerMapRow(serverSites.list, d.toString(), splitId);
+                }
+                continue;
+            }
             if (outbound != "proxy" && outbound != "direct" && !outbound.isEmpty()) {
                 otherRulesJson << QString::fromUtf8(QJsonDocument(rule).toJson(QJsonDocument::Compact));
                 continue;
@@ -215,6 +408,12 @@ void SimpleRouteEditor::parseRulesIntoLists(const QJsonArray &rules) {
             continue;
         }
         if (hasProc) {
+            if (splitId >= 0) {
+                for (const auto &p: rule.value("process_name").toArray()) {
+                    addServerMapRow(serverApps.list, p.toString(), splitId);
+                }
+                continue;
+            }
             if (outbound != "proxy" && outbound != "direct" && !outbound.isEmpty()) {
                 otherRulesJson << QString::fromUtf8(QJsonDocument(rule).toJson(QJsonDocument::Compact));
                 continue;
@@ -230,10 +429,10 @@ void SimpleRouteEditor::parseRulesIntoLists(const QJsonArray &rules) {
 }
 
 void SimpleRouteEditor::loadFromJson(const QString &json) {
-    for (auto *list: {directSites.list, proxySites.list, directApps.list, proxyApps.list}) {
-        if (list) list->clear();
-    }
+    clearFriendlyLists();
     otherRulesJson.clear();
+    refillServerCombo(serverSites.server);
+    refillServerCombo(serverApps.server);
 
     QByteArray raw = json.trimmed().toUtf8();
     if (raw.startsWith("\xEF\xBB\xBF")) raw = raw.mid(3);
@@ -270,9 +469,7 @@ bool SimpleRouteEditor::syncListsFromJson() {
         return false;
     }
 
-    for (auto *list: {directSites.list, proxySites.list, directApps.list, proxyApps.list}) {
-        if (list) list->clear();
-    }
+    clearFriendlyLists();
     otherRulesJson.clear();
     if (doc.isObject()) {
         parseRulesIntoLists(doc.object().value("rules").toArray());
@@ -302,6 +499,31 @@ QString SimpleRouteEditor::toJson() const {
     pushDomain(proxySites.list, "proxy");
     pushProc(directApps.list, "direct");
     pushProc(proxyApps.list, "proxy");
+
+    // Group split-routing matchers by outbound tag
+    auto pushServerMap = [&](QListWidget *list, bool isDomain) {
+        if (!list) return;
+        QMap<QString, QJsonArray> byOutbound;
+        for (int i = 0; i < list->count(); ++i) {
+            auto *it = list->item(i);
+            const QString matcher = it->data(kRoleMatcher).toString();
+            QString outbound = it->data(kRoleOutbound).toString();
+            if (outbound.isEmpty()) {
+                outbound = profileOutboundTag(it->data(kRoleProfileId).toInt());
+            }
+            if (matcher.isEmpty() || outbound.isEmpty()) continue;
+            byOutbound[outbound] += matcher;
+        }
+        for (auto it = byOutbound.begin(); it != byOutbound.end(); ++it) {
+            if (isDomain) {
+                rules += QJsonObject{{"domain_suffix", it.value()}, {"outbound", it.key()}};
+            } else {
+                rules += QJsonObject{{"outbound", it.key()}, {"process_name", it.value()}};
+            }
+        }
+    };
+    pushServerMap(serverSites.list, true);
+    pushServerMap(serverApps.list, false);
 
     for (const auto &raw: otherRulesJson) {
         auto d = QJsonDocument::fromJson(raw.toUtf8());

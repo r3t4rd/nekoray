@@ -245,6 +245,10 @@ namespace NekoGui {
         return result;
     }
 
+    QString ProfileOutboundTag(int profileId) {
+        return QStringLiteral("p-%1").arg(profileId);
+    }
+
     QString BuildChain(int chainId, const std::shared_ptr<BuildConfigStatus> &status) {
         auto group = profileManager->GetGroup(status->ent->gid);
         if (group == nullptr) {
@@ -301,6 +305,73 @@ namespace NekoGui {
         return chainTagOut;
     }
 
+    // Resolve a profile (and nested chain list) without touching status->error on soft failures.
+    static QList<std::shared_ptr<ProxyEntity>> ResolveProfileChain(const std::shared_ptr<ProxyEntity> &ent, QString *error) {
+        QList<std::shared_ptr<ProxyEntity>> resolved;
+        if (!ent) {
+            if (error) *error = QStringLiteral("null profile");
+            return resolved;
+        }
+        if (ent->type == "chain") {
+            auto list = ent->ChainBean()->list;
+            std::reverse(std::begin(list), std::end(list));
+            for (auto id: list) {
+                resolved += profileManager->GetProfile(id);
+                if (resolved.last() == nullptr) {
+                    if (error) *error = QStringLiteral("chain missing ent: %1").arg(id);
+                    resolved.clear();
+                    break;
+                }
+                if (resolved.last()->type == "chain") {
+                    if (error) *error = QStringLiteral("chain in chain is not allowed: %1").arg(id);
+                    resolved.clear();
+                    break;
+                }
+            }
+        } else {
+            resolved += ent;
+        }
+        return resolved;
+    }
+
+    // Embed every other profile in the group as p-<id> so Custom Route can target them.
+    static void BuildSplitRoutingOutbounds(const std::shared_ptr<BuildConfigStatus> &status) {
+        if (status->forTest || status->forExport) return;
+        auto group = profileManager->GetGroup(status->ent->gid);
+        if (!group) return;
+
+        for (const auto &pf: group->ProfilesWithOrder()) {
+            if (!pf || pf->id == status->ent->id) continue;
+
+            QString resolveErr;
+            auto ents = ResolveProfileChain(pf, &resolveErr);
+            if (ents.isEmpty()) continue;
+
+            const int outboundsBefore = status->outbounds.size();
+            const int rulesBefore = status->routingRules.size();
+            const int dnsDirectBefore = status->domainListDNSDirect.size();
+            const int ignoreBefore = status->result->ignoreConnTag.size();
+            const auto extRsBefore = status->result->extRs.size();
+            const int statsBefore = status->result->outboundStats.size();
+            const QString errorBefore = status->result->error;
+
+            const QString tag = ProfileOutboundTag(pf->id);
+            // chainId != 0 so we never steal the primary "proxy" tag path
+            BuildChainInternal(pf->id + 1, ents, status, tag);
+
+            if (!status->result->error.isEmpty() && status->result->error != errorBefore) {
+                // Roll back a failed extra outbound; keep primary config working
+                while (status->outbounds.size() > outboundsBefore) status->outbounds.removeLast();
+                while (status->routingRules.size() > rulesBefore) status->routingRules.removeLast();
+                while (status->domainListDNSDirect.size() > dnsDirectBefore) status->domainListDNSDirect.removeLast();
+                while (status->result->ignoreConnTag.size() > ignoreBefore) status->result->ignoreConnTag.removeLast();
+                while (status->result->outboundStats.size() > statsBefore) status->result->outboundStats.removeLast();
+                while (status->result->extRs.size() > extRsBefore) status->result->extRs.pop_back();
+                status->result->error = errorBefore;
+            }
+        }
+    }
+
 #define DOMAIN_USER_RULE                                                             \
     for (const auto &line: SplitLinesSkipSharp(dataStore->routing->proxy_domain)) {  \
         if (dataStore->routing->dns_routing) status->domainListDNSRemote += line;    \
@@ -326,7 +397,8 @@ namespace NekoGui {
     }
 
     QString BuildChainInternal(int chainId, const QList<std::shared_ptr<ProxyEntity>> &ents,
-                               const std::shared_ptr<BuildConfigStatus> &status) {
+                               const std::shared_ptr<BuildConfigStatus> &status,
+                               const QString &forcedTagOut) {
         QString chainTag = "c-" + Int2String(chainId);
         QString chainTagOut;
         bool muxApplied = false;
@@ -347,15 +419,26 @@ namespace NekoGui {
 
             // first profile set as global
             auto isFirstProfile = index == ents.length() - 1;
-            if (isFirstProfile) {
-                needGlobal = true;
-                tagOut = "g-" + Int2String(ent->id);
-            }
 
-            // last profile set as "proxy"
-            if (chainId == 0 && index == 0) {
+            if (!forcedTagOut.isEmpty()) {
+                // Split-routing extras: fully isolated tags (never share g-<id> with primary)
+                if (index == 0) {
+                    tagOut = forcedTagOut;
+                } else {
+                    tagOut = forcedTagOut + QStringLiteral("-h") + Int2String(ent->id);
+                }
                 needGlobal = false;
-                tagOut = "proxy";
+            } else {
+                if (isFirstProfile) {
+                    needGlobal = true;
+                    tagOut = "g-" + Int2String(ent->id);
+                }
+
+                // last profile set as "proxy"
+                if (chainId == 0 && index == 0) {
+                    needGlobal = false;
+                    tagOut = "proxy";
+                }
             }
 
             // ignoreConnTag
@@ -386,7 +469,10 @@ namespace NekoGui {
             } else {
                 // index == 0 means last profile in chain / not chain
                 chainTagOut = tagOut;
-                status->result->outboundStat = ent->traffic_data;
+                // Do not overwrite primary outboundStat when embedding split-routing extras
+                if (forcedTagOut.isEmpty()) {
+                    status->result->outboundStat = ent->traffic_data;
+                }
             }
 
             // chain rules: this
@@ -594,6 +680,10 @@ namespace NekoGui {
         // Outbounds
         auto tagProxy = BuildChain(0, status);
         if (!status->result->error.isEmpty()) return;
+        Q_UNUSED(tagProxy)
+
+        // Extra outbounds for per-app / per-site split routing (p-<id>)
+        BuildSplitRoutingOutbounds(status);
 
         // direct & bypass (block/dns special outbounds removed — use rule actions)
         status->outbounds += QJsonObject{
@@ -888,6 +978,15 @@ namespace NekoGui {
         if (status->forTest) routingRules = {};
         if (!status->forTest) QJSONARRAY_ADD(routingRules, QString2QJsonObject(dataStore->custom_route_global)["rules"].toArray())
         QJSONARRAY_ADD(routingRules, status->routingRules)
+
+        // Known outbound tags for split-routing validation
+        QSet<QString> outboundTags;
+        for (const auto &ob: status->outbounds) {
+            auto tag = ob.toObject().value("tag").toString();
+            if (!tag.isEmpty()) outboundTags.insert(tag);
+        }
+        const QString startedProfileTag = ProfileOutboundTag(status->ent->id);
+
         QJsonArray normalizedRules;
         for (const auto &item: routingRules) {
             auto rule = item.toObject();
@@ -898,6 +997,12 @@ namespace NekoGui {
             } else if (out == "dns-out" || out == "dns") {
                 rule.remove("outbound");
                 rule["action"] = "hijack-dns";
+            } else if (out == startedProfileTag) {
+                // Started profile is tagged "proxy", not p-<id>
+                rule["outbound"] = "proxy";
+            } else if (out.startsWith(QStringLiteral("p-")) && !outboundTags.contains(out)) {
+                // Target profile missing from this build — drop the rule
+                continue;
             }
 
             // Quietly cut deprecated geoip/geosite/source_geoip (do not convert — drop the rule if empty)

@@ -51,7 +51,11 @@ namespace NekoGui {
     QString BuildChain(int chainId, const std::shared_ptr<BuildConfigStatus> &status);
 
     QString BuildChainInternal(int chainId, const QList<std::shared_ptr<ProxyEntity>> &ents,
-                               const std::shared_ptr<BuildConfigStatus> &status);
+                               const std::shared_ptr<BuildConfigStatus> &status,
+                               const QString &forcedTagOut = {});
+
+    // Stable outbound tag for split-routing rules (p-<profileId>).
+    QString ProfileOutboundTag(int profileId);
 
     QString WriteVPNSingBoxConfig();
 
